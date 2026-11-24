@@ -29,6 +29,6 @@ def analyze(meeting: MeetingDep, db: DB, body: AnalyzeRequest = Body(default_fac
         except llm_service.LLMError as exc:
             raise HTTPException(503, str(exc)) from exc
     try:
-        return JobOut.model_validate(job_service.enqueue(db, meeting, llm_model=model))
+        return JobOut.model_validate(job_service.enqueue(db, meeting, llm_model=model, retranscribe=body.retranscribe))
     except job_service.JobConflictError as exc:
         raise HTTPException(409, str(exc)) from exc

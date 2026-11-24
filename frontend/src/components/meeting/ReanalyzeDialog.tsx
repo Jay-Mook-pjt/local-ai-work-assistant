@@ -28,6 +28,7 @@ export function ReanalyzeDialog({
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+  const [retranscribe, setRetranscribe] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,7 +51,7 @@ export function ReanalyzeDialog({
     setBusy(true);
     setError(null);
     try {
-      await analyzeMeeting(meetingId, { llm_model: model || undefined, overwrite_edited: confirmOverwrite });
+      await analyzeMeeting(meetingId, { llm_model: model || undefined, overwrite_edited: confirmOverwrite, retranscribe });
       onQueued();
       onClose();
     } catch (e) {
@@ -82,7 +83,16 @@ export function ReanalyzeDialog({
             ))}
           </select>
         </label>
-        <p className="text-xs">{hasTranscript ? "음성 인식 결과는 그대로 쓰고 AI 분석만 다시 실행합니다." : "음성 인식부터 다시 실행합니다."}</p>
+        {hasTranscript ? (
+          <label className="flex items-start gap-2 text-xs">
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-indigo-600" checked={retranscribe} onChange={(e) => setRetranscribe(e.target.checked)} />
+            <span>
+              음성 인식부터 다시 실행 <span className="muted">(용어집·참석자를 바꿨을 때. 끄면 기존 전사문을 그대로 쓰고 AI 분석만 다시 합니다)</span>
+            </span>
+          </label>
+        ) : (
+          <p className="text-xs">음성 인식부터 실행합니다.</p>
+        )}
         {edited && (
           <label className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
             <input type="checkbox" className="mt-0.5 h-4 w-4 accent-red-600" checked={confirmOverwrite} onChange={(e) => setConfirmOverwrite(e.target.checked)} />

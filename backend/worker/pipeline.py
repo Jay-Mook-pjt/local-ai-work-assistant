@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.agents import meeting_agent
 from app.config import get_settings
 from app.models import Job, Meeting, Transcript
-from app.services import job_service, llm_service, media, meeting_service, settings_service, storage, stt_service
+from app.services import glossary_service, job_service, llm_service, media, meeting_service, settings_service, storage, stt_service
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def transcribe(ctx: Context) -> None:
     audio = ctx.meeting.audio
     assert audio is not None and audio.processed_path
     existing = ctx.db.scalar(select(Transcript).where(Transcript.meeting_id == ctx.meeting.id))
-    if existing is not None and existing.audio_file_id == audio.id and existing.segments:
+    if existing is not None and existing.audio_file_id == audio.id and existing.segments and not ctx.job.retranscribe:
         ctx.segments = [stt_service.Segment(**s) for s in existing.segments]
         ctx.progress("TRANSCRIBING", 55, f"기존 전사문 재사용 ({len(ctx.segments)}개 구간)")
         return
@@ -82,7 +82,7 @@ def transcribe(ctx: Context) -> None:
     try:
         segments = stt_service.transcribe(
             storage.resolve(audio.processed_path),
-            initial_prompt=stt_service.build_initial_prompt(m.title, m.agenda, m.attendees),
+            initial_prompt=stt_service.build_initial_prompt(m.title, m.agenda, m.attendees, glossary_service.stt_terms(ctx.db)),
             on_progress=on_progress,
             transcribe_fn=ctx.transcribe_fn,
         )
@@ -121,7 +121,9 @@ def analyze(ctx: Context) -> None:
             ctx.progress("GENERATING", 85 + 10 * i, f"회의록 통합 및 근거 검증 중 · {model}")
 
     try:
-        result = meeting_agent.analyze(ctx.meeting, ctx.segments, model=model, on_progress=on_progress, chat=ctx.chat_fn)
+        result = meeting_agent.analyze(
+            ctx.meeting, ctx.segments, model=model, on_progress=on_progress, chat=ctx.chat_fn, glossary=glossary_service.prompt_block(ctx.db)
+        )
     except llm_service.LLMError as exc:
         raise PipelineError(str(exc)) from exc
     meeting_service.save_minutes(ctx.db, ctx.meeting.id, result.minutes, llm_model=result.model, edited=False, review_notes=result.notes)

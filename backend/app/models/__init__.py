@@ -89,6 +89,8 @@ class Job(Base):
     meeting_id: Mapped[str] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)
     llm_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Run speech recognition again even if a transcript of this audio exists.
+    retranscribe: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -180,4 +182,18 @@ class AppSetting(Base):
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+
+class GlossaryTerm(Base):
+    """Project vocabulary used as reference for STT (initial prompt) and the LLM."""
+
+    __tablename__ = "glossary_terms"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    term: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    # Spellings speech recognition tends to produce for this term (e.g. "알피에이").
+    aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)

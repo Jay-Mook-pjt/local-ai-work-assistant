@@ -10,6 +10,8 @@ import type {
   EmailHistoryItem,
   EmailPreview,
   EmailRequest,
+  GlossaryInput,
+  GlossaryTerm,
   Job,
   Meeting,
   MeetingCreateInput,
@@ -69,8 +71,18 @@ export const getJob = (id: string) => request<Job>(`/api/jobs/${enc(id)}`);
  * Queues (re-)analysis. Reuses the existing transcript when the audio is unchanged,
  * so re-running with another model only repeats the LLM step.
  */
-export const analyzeMeeting = (meetingId: string, opts: { llm_model?: string; overwrite_edited?: boolean } = {}) =>
+export const analyzeMeeting = (meetingId: string, opts: { llm_model?: string; overwrite_edited?: boolean; retranscribe?: boolean } = {}) =>
   request<Job>(`/api/meetings/${enc(meetingId)}/analyze`, { method: "POST", json: opts });
+
+export const listGlossary = () => request<GlossaryTerm[]>("/api/glossary");
+
+export const createGlossaryTerm = (input: GlossaryInput) => request<GlossaryTerm>("/api/glossary", { method: "POST", json: input });
+
+export const updateGlossaryTerm = (id: string, input: GlossaryInput) => request<GlossaryTerm>(`/api/glossary/${enc(id)}`, { method: "PUT", json: input });
+
+export async function deleteGlossaryTerm(id: string): Promise<void> {
+  await request(`/api/glossary/${enc(id)}`, { method: "DELETE" });
+}
 
 export const getSettings = () => request<AppSettings>("/api/settings");
 

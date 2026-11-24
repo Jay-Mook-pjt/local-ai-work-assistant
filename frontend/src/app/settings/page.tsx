@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Alert, Button, Card, Loading, PageHeader, cx } from "@/components/common/ui";
+import { GlossaryCard } from "@/components/common/GlossaryCard";
 import { SystemStatus } from "@/components/common/SystemStatus";
 import { applyTheme, useThemePref, type ThemePref } from "@/components/layout/ThemeToggle";
 import { useAsync } from "@/hooks/useAsync";
@@ -135,6 +136,10 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
+        </Card>
+
+        <Card title="프로젝트 용어집" className="xl:col-span-2">
+          <GlossaryCard />
         </Card>
 
         <Card title="이메일 (SMTP)">

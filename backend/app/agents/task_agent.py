@@ -4,21 +4,16 @@ and correct attendee names that speech recognition misheard by one character."""
 import re
 from difflib import SequenceMatcher
 
-from app.agents.review_agent import norm, person_core
+from app.agents.review_agent import norm, person_core, similar_name, split_people
 from app.schemas.meeting import UNKNOWN, ActionItemIn, MinutesUpdate
 
 
-def _one_off(a: str, b: str) -> bool:
-    """Same length, same first character (surname), at most one differing character."""
-    return len(a) == len(b) and 2 <= len(a) <= 4 and a != b and a[0] == b[0] and sum(x != y for x, y in zip(a, b, strict=True)) <= 1
-
-
 def misheard_attendee(name: str, attendees: list[str]) -> str | None:
-    """'이지훈 대리' → '이지은 대리' if exactly one attendee is a one-character variant."""
+    """'이지훈 대리' → '이지은 대리' if exactly one attendee sounds like it (similar_name)."""
     core = norm(person_core(name))
     if any(norm(person_core(a)) == core for a in attendees):
         return None
-    matches = [a for a in attendees if _one_off(core, norm(person_core(a)))]
+    matches = [a for a in attendees if similar_name(core, person_core(a))]
     return matches[0] if len(matches) == 1 else None
 
 
@@ -27,9 +22,12 @@ def correct_names(m: MinutesUpdate, attendees: list[str]) -> list[str]:
     which stay verbatim). Returns notes describing each correction."""
     fixes: dict[str, str] = {}
     for a in m.action_items:
-        target = misheard_attendee(a.assignee, attendees) if a.assignee != UNKNOWN else None
-        if target:
-            fixes[person_core(a.assignee)] = person_core(target)
+        if a.assignee == UNKNOWN:
+            continue
+        for person in split_people(a.assignee):
+            target = misheard_attendee(person, attendees)
+            if target:
+                fixes[person_core(person)] = person_core(target)
     if not fixes:
         return []
 

@@ -2,7 +2,7 @@
 
 Mac mini에서 동작하는 개인용 로컬 AI 업무 비서입니다. 회의 음성을 업로드하면 로컬 STT(MLX Whisper)와 로컬 LLM(Ollama)이 회의록을 만들고, 사용자가 검토·승인한 뒤에만 이메일로 발송합니다. 외부 AI API는 사용하지 않습니다.
 
-> 현재 진행 단계: **PHASE 5 — DOCX·이메일 완료**. 음성 업로드부터 AI 회의록 생성, 검토·수정, DOCX 생성·다운로드, 이메일 미리보기·승인 발송까지 MVP 흐름이 동작합니다. 이메일을 실제로 보내려면 아래 '이메일 발송 설정'으로 SMTP 계정을 입력해야 합니다.
+> 현재 진행 단계: **PHASE 6 — 통합 테스트 완료**. 음성 업로드부터 회의록·DOCX·이메일(승인 발송)까지 MVP 흐름이 동작하며, 합성 회의(2분·36분)·오류 복구·데이터 보존 테스트를 통과했습니다. 결과: [docs/test-reports/PHASE6-summary.md](docs/test-reports/PHASE6-summary.md)
 
 ## 실행 환경 (PHASE 0 점검 결과, 2026-11-23)
 
@@ -98,7 +98,7 @@ frontend/src/
 | GET | `/api/meetings?q=&from=&to=&status=` | 회의 목록 (제목·목적·참석자·안건·전사문·회의록·후속 업무 내용 검색) |
 | GET / DELETE | `/api/meetings/{id}` | 회의 조회 / 삭제 (DB 행과 저장된 모든 파일 삭제, 처리 중이면 409) |
 | POST | `/api/meetings/{id}/audio` | 음성 업로드 (multipart `file`) |
-| POST | `/api/meetings/{id}/analyze` | 분석 작업 등록. 본문(선택) `{"llm_model": "...", "overwrite_edited": false}`. 같은 음성의 전사문이 있으면 재사용하고 AI 분석만 다시 실행. 직접 수정한 회의록이 있으면 `overwrite_edited: true` 없이는 409 |
+| POST | `/api/meetings/{id}/analyze` | 분석 작업 등록. 본문(선택) `{"llm_model": "...", "overwrite_edited": false, "retranscribe": false}`. 같은 음성의 전사문이 있으면 재사용하고 AI 분석만 다시 실행. 직접 수정한 회의록이 있으면 `overwrite_edited: true` 없이는 409 |
 | GET | `/api/jobs/{id}` | 작업 상태 |
 | GET | `/api/meetings/{id}/transcript` | STT 결과 (없으면 `null`) |
 | GET / PUT | `/api/meetings/{id}/minutes` | 회의록 조회 / 수정 (후속 업무 포함, 기존 업무 id 유지) |
@@ -112,6 +112,7 @@ frontend/src/
 | POST | `/api/meetings/{id}/email/send` | `confirm: true`와 미리보기의 `content_hash`가 있어야 발송. 내용·회의록이 바뀌었으면 409 |
 | POST | `/api/email/test-connection` | SMTP 로그인만 확인 (발송 없음) |
 | GET | `/api/dashboard` | 대시보드 집계 |
+| GET / POST / PUT / DELETE | `/api/glossary` | 프로젝트 용어집 |
 | GET / PUT | `/api/settings` | 기본 LLM 모델 조회·변경(설치된 모델만 허용), 설치 모델 목록, STT·업로드·SMTP 설정 요약 |
 | GET | `/api/health` | DB·Ollama·STT 상태 |
 
@@ -153,7 +154,14 @@ API 문서: <http://127.0.0.1:8000/docs> (이 Mac에서만 접속 가능).
 4. **후속 업무 정리**(`task_agent.py`): 중복 업무 병합, 담당자를 등록된 참석자 이름으로 맞춤, STT가 참석자 이름을 한 글자 다르게 인식한 경우(예: 이지은→이지훈) 참석자 이름으로 보정(근거 인용문은 원문 유지).
 5. 검증 결과는 회의록의 `review_notes`로 저장되어 화면에 **"검토가 필요한 항목"**으로 표시됩니다.
 
-프롬프트는 `app/prompts/<이름>_v<N>.md` 파일로 관리하며, 사용 버전은 `app/services/prompt_service.py`의 `PROMPT_VERSIONS`에서 정합니다(현재 system v2, 나머지 v1).
+프롬프트는 `app/prompts/<이름>_v<N>.md` 파일로 관리하며, 사용 버전은 `app/services/prompt_service.py`의 `PROMPT_VERSIONS`에서 정합니다(현재 system v3, chunk·merge·single v2).
+
+### 프로젝트 용어집
+설정 → **프로젝트 용어집**에서 업무 용어와 뜻(필요하면 음성 인식이 잘못 적는 표기)을 등록합니다. 모델을 재학습하는 방식이 아니라, 새로 처리하는 모든 회의에 다음처럼 참고 자료로 전달됩니다.
+- **음성 인식**: 용어를 Whisper 초기 프롬프트(표기 힌트)에 포함 — 참석자 이름·용어·안건 순, 300자 이내.
+- **AI 분석**: 시스템 프롬프트 끝에 `# 프로젝트 용어집` 섹션으로 뜻을 전달. 용어집 내용을 회의록에 새로 추가하지 말라는 규칙을 함께 넣습니다.
+- 이미 만든 회의록에 반영하려면 회의 상세 → 다시 분석 → **음성 인식부터 다시 실행**을 선택합니다.
+- API: `GET/POST /api/glossary`, `PUT/DELETE /api/glossary/{id}`. 데이터는 DB(`glossary_terms`)에 저장되며 Git에는 포함되지 않습니다.
 
 ### 모델 비교 방법
 회의 상세 → **다시 분석** → 모델 선택. 같은 음성이면 전사문을 재사용해 LLM 단계만 실행합니다. 결과 회의록에는 사용한 모델명이 표시됩니다. 직접 수정한 회의록은 덮어쓰기 확인 후에만 바뀝니다.
@@ -231,6 +239,20 @@ cd backend && .venv/bin/python -m pytest -q     # 임시 DB·저장소, ffmpeg�
 cd frontend && npm test && npm run typecheck && npm run lint && npm run build
 ```
 
+## 통합 테스트 (PHASE 6)
+
+정답이 정해진 한국어 회의 음성을 macOS TTS로 합성해 실제 경로(`:3000`)로 처리하고 자동 채점합니다. 보고서는 `docs/test-reports/`에 저장됩니다.
+
+```bash
+cd backend
+.venv/bin/python -m tests.integration.e2e run short     # 2분 회의
+.venv/bin/python -m tests.integration.e2e run long      # 36분 회의
+.venv/bin/python -m tests.integration.e2e recovery      # Worker 강제 종료·Ollama 연결 실패·잘못된 파일
+.venv/bin/python -m tests.integration.e2e persistence   # 전체 재시작 후 데이터 비교
+```
+
+최근 결과: short 16/17, long 26/27(실패는 모두 STT 이름 오인식이며 회의록에서는 보정됨), recovery 9/9, persistence 4/4. 36분 회의 처리 약 4.7분. 자세한 내용과 남은 한계는 [PHASE6-summary.md](docs/test-reports/PHASE6-summary.md)를 참고하세요.
+
 ## 보안 원칙
 - 외부 AI API 미사용, 모든 음성·텍스트는 이 Mac에서만 처리
 - Ollama·Backend는 `127.0.0.1` 바인딩, Frontend만 LAN 노출, 포트포워딩 없음
@@ -249,10 +271,11 @@ cd frontend && npm test && npm run typecheck && npm run lint && npm run build
 | 3 | Backend API·DB·Worker | ✅ 완료 (STT·LLM 단계 제외) |
 | 4 | Ollama·MLX Whisper 연동 | ✅ 완료 |
 | 5 | DOCX·이메일 | ✅ 완료 (실제 발송은 SMTP 계정 입력 필요) |
-| 6 | 통합 테스트 | ⏳ 예정 |
+| 6 | 통합 테스트 | ✅ 완료 |
 | 7 | 로컬 운영(launchd, 백업) | ⏳ 예정 |
 
 ## 변경 이력
+- **PHASE 6** — 재실행 가능한 통합 테스트 하네스(TTS 합성·자동 채점·자원 측정·보고서), short/long/recovery/persistence 시나리오, 발견 문제 수정(자모 기반 이름 보정, 여러 명 담당자 검증, 미결/다음 회의 정리·중복 제거, 의견의 결정 등록 방지, 업무 배정 판정 회귀 수정, 녹음에 없는 '다음 회의' 표시, 문장 잘림), 프롬프트 system v3·chunk/single/merge v2, 프로젝트 용어집(STT·LLM 참고)과 "음성 인식부터 다시" 옵션, pytest 102개.
 - **PHASE 5** — DOCX 생성(8개 섹션, 고정 표 레이아웃, 미확인 강조)·다운로드(한글 파일명)·삭제, 이메일 초안·서버 미리보기·해시 기반 승인 발송·발송 이력, SMTP STARTTLS/SSL·키체인 비밀번호·연결 테스트, 화면의 문서·이메일 패널과 발송 확인 창, 설정 화면 SMTP 연결 테스트, 메일 초안 생성을 Backend로 이전, aiosmtpd 개발 의존성(requirements-dev.txt), pytest 89개.
 - **PHASE 4** — MLX Whisper 음성 인식(구간 분할·오버랩·환각 필터·초기 프롬프트), Ollama 구조화 출력 클라이언트(호출 로그·재시도·오류 메시지), Meeting Agent(구간 분석→통합), 근거 검증(타임스탬프 교정·담당자/기한/숫자 확인·업무 배정 분리·이름 보정), 검토 항목 화면 표시, 기본 모델 설정 API·화면, 다른 모델로 다시 분석(전사문 재사용·수정본 보호), DB 컬럼 자동 추가, 프롬프트 버전 관리, pytest 73개, 실제 한국어 회의 음성으로 3개 모델 비교.
 - **PHASE 3** — SQLAlchemy 모델 8개 테이블, 회의·업로드·분석·작업·전사문·회의록·후속 업무·대시보드 API, 다단계 업로드 검증, SQLite 작업 대기열과 Worker(ffmpeg 전처리), 회의 삭제 시 파일 삭제, Frontend Mock 제거 및 실제 API 연결(업로드 진행률 표시), 대용량 업로드용 스트리밍 Route Handler, rewrite를 `fallback`으로 변경, 스크립트에 Worker 추가, pytest 40개.

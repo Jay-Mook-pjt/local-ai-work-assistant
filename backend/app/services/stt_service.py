@@ -105,11 +105,16 @@ def clean_segments(raw: list[dict], offset: float) -> list[Segment]:
     return out
 
 
-def build_initial_prompt(title: str, agenda: list[str], attendees: list[str]) -> str:
-    """Vocabulary hint for Whisper (domain terms, names). Kept short: Whisper uses ≤224 tokens."""
-    parts = [title, *agenda, *attendees]
-    prompt = ", ".join(p for p in parts if p)
-    return prompt[:300]
+def build_initial_prompt(title: str, agenda: list[str], attendees: list[str], terms: list[str] | None = None) -> str:
+    """Vocabulary hint for Whisper (names, glossary terms, agenda). Kept short: Whisper
+    only uses the last ~224 tokens of the prompt, so the most specific hints go first
+    and the whole string is capped."""
+    parts = [title, *attendees, *(terms or []), *agenda]
+    seen: list[str] = []
+    for p in parts:
+        if p and p not in seen:
+            seen.append(p)
+    return ", ".join(seen)[:300]
 
 
 def transcribe(

@@ -203,3 +203,18 @@ export interface AppSettings {
   max_upload_mb: number;
   smtp_configured: boolean;
 }
+
+export interface GlossaryTerm {
+  id: string;
+  term: string;
+  description: string;
+  /** Spellings speech recognition may produce for this term. */
+  aliases: string[];
+  updated_at: string;
+}
+
+export interface GlossaryInput {
+  term: string;
+  description: string;
+  aliases: string[];
+}

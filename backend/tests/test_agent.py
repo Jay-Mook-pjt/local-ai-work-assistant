@@ -179,3 +179,101 @@ def test_decision_naming_an_assignee_is_treated_as_assignment():
     final.decisions.append(final.decisions[0].model_copy(update={"content": "이지은 대리님이 금요일까지 재검증하는 걸로 함", "evidence": "상품설명서는 열두 개 중 아홉 개 검증이 끝났습니다"}))
     r = review_agent.review(final, SEGMENTS, [], duration=1900)
     assert [d.content for d in r.minutes.decisions] == ["12월 둘째 주까지 전 상품 자동화 적용"]
+
+
+def test_similar_name_handles_linking_sound_and_rejects_other_surnames():
+    from app.agents.review_agent import similar_name
+
+    assert similar_name("최유나", "최윤아")  # 윤아 → 유나 (연음)
+    assert similar_name("이지훈", "이지은")
+    assert not similar_name("채윤아", "최윤아")  # different surname
+    assert not similar_name("최윤", "최윤아")  # different length
+    assert not similar_name("최윤아", "최윤아")  # identical is not a "mishearing"
+
+
+def test_multi_person_assignee_keeps_only_grounded_people():
+    segs = [Segment(930, 936, "최유나 책임님이 이번 달 말까지 점검 업체 견적을 세 곳에서 받아 주세요.")]
+    final = FinalMinutes(
+        meeting_summary="견적 요청",
+        action_items=[{"task": "업체 견적 받기", "assignee": "최유나, 채김", "deadline": "이번 달 말까지", "evidence": "최유나 책임님이 이번 달 말까지 점검 업체 견적을 세 곳에서 받아 주세요", "timestamp": "00:15:30"}],
+    )
+    m = _meeting()
+    m.attendees, m.agenda = ["김민수 과장", "최윤아 책임"], []
+    res = meeting_agent.analyze(m, segs, chat=FakeLLM(final))
+    a = res.minutes.action_items[0]
+    assert a.assignee == "최윤아 책임"  # 채김 dropped (never mentioned), 최유나 corrected to the attendee
+    assert any("보정" in n for n in res.notes)
+
+
+def test_next_meeting_items_move_out_of_actions_and_lists_are_deduplicated():
+    base = FINAL.model_dump()
+    final = FinalMinutes.model_validate(
+        base
+        | {
+            "action_items": [*base["action_items"], {"task": "다음 회의에서 교육 자료 준비 상태 확인", "assignee": "미확인", "deadline": "미확인", "evidence": "", "timestamp": "미확인"}],
+            "open_issues": ["테스트 서버 증설 여부", "테스트 서버 증설 여부."],
+            "next_meeting_checks": ["테스트 서버 증설 여부", "재검증 결과 확인"],
+        }
+    )
+    r = review_agent.review(final, SEGMENTS, [], duration=1900)
+    m = r.minutes
+    assert all("교육 자료" not in a.task for a in m.action_items)
+    assert "교육 자료 준비 상태 확인" in m.next_meeting_checks
+    assert m.open_issues.count("테스트 서버 증설 여부") == 1
+    assert "테스트 서버 증설 여부" not in m.next_meeting_checks  # kept once, as an open issue
+    assert "재검증 결과 확인" in m.next_meeting_checks
+
+
+def test_unassigned_item_due_next_meeting_becomes_a_check():
+    base = FINAL.model_dump()
+    final = FinalMinutes.model_validate(base | {"action_items": [*base["action_items"], {"task": "교육 자료 준비 상태 확인", "assignee": "미확인", "deadline": "다음 회의", "evidence": "", "timestamp": "미확인"}]})
+    m = review_agent.review(final, SEGMENTS, [], duration=1900).minutes
+    assert all("교육 자료" not in a.task for a in m.action_items)
+    assert "교육 자료 준비 상태 확인" in m.next_meeting_checks
+
+
+def test_opinions_are_not_decisions():
+    base = FINAL.model_dump()
+    opinion = {"content": "상품설명서는 아홉 개까지 진행이 가능하다는 의견이 있었다", "evidence": "상품설명서는 열두 개 중 아홉 개 검증이 끝났습니다", "timestamp": "00:00:12"}
+    final = FinalMinutes.model_validate(base | {"decisions": [*base["decisions"], opinion]})
+    r = review_agent.review(final, SEGMENTS, [], duration=1900)
+    assert [d.content for d in r.minutes.decisions] == ["12월 둘째 주까지 전 상품 자동화 적용"]
+    assert any("의견·제안" in n for n in r.notes)
+
+
+def test_unknown_suffix_does_not_leave_dangling_particle():
+    final = FINAL.model_copy(update={"open_issues": ["RDA와 RPA 중 어떤 방식을 선택할지에 대한 결정이 미확인"]})
+    r = review_agent.review(final, SEGMENTS, [], duration=1900)
+    assert r.minutes.open_issues[0] == "RDA와 RPA 중 어떤 방식을 선택할지에 대한 결정 미정"
+
+
+def test_unspoken_next_meeting_claim_is_flagged():
+    segs = [Segment(0, 5, "지리서는 엑셀로 되어 있습니다."), Segment(6, 10, "VBA로 먼저 처리하고 있습니다.")]
+    final = FinalMinutes(meeting_summary="다음 회의에서 지리서 구성을 확인하기로 하였다.")
+    r = review_agent.review(final, segs, [], duration=10)
+    assert any("다음 회의" in n for n in r.notes)
+    # Not flagged when the meeting really mentions it.
+    r2 = review_agent.review(final, [*segs, Segment(11, 14, "다음 회의에서 다시 보죠.")], [], duration=14)
+    assert not any("다음 회의" in n for n in r2.notes)
+
+
+def test_decision_next_to_an_assignment_is_kept():
+    """Regression (PHASE 6 long run): an action item whose evidence resolves to the
+    decision's utterance must not make the decision look like an assignment."""
+    segs = [
+        Segment(929, 935, "외부 보안 점검은 일월 셋째 주에 진행하는 것으로 확정하겠습니다."),
+        Segment(936, 944, "최윤아 책임님이 이번 달 말까지 점검 업체 견적을 세 곳에서 받아 주세요."),
+    ]
+    final = FinalMinutes(
+        meeting_summary="보안 점검 일정 확정, 견적 요청",
+        decisions=[{"content": "외부 보안 점검은 1월 셋째 주에 진행", "evidence": "외부 보안 점검은 일월 셋째 주에 진행하는 것으로 확정하겠습니다", "timestamp": "00:15:29"}],
+        action_items=[{"task": "외부 보안 점검 업체 견적", "assignee": "최윤아 책임", "deadline": "이번 달 말까지", "evidence": "외부 보안 점검", "timestamp": "00:15:29"}],
+    )
+    r = review_agent.review(final, segs, [], duration=944, attendees=["최윤아 책임"])
+    assert [d.content for d in r.minutes.decisions] == ["외부 보안 점검은 1월 셋째 주에 진행"]
+
+
+def test_next_meeting_checks_with_prefix_are_deduplicated():
+    final = FINAL.model_copy(update={"open_issues": [], "next_meeting_checks": ["다음 회의에서 교육 자료 준비 상태를 확인하겠습니다.", "교육 자료 준비 상태 확인"]})
+    r = review_agent.review(final, SEGMENTS, [], duration=1900)
+    assert len(r.minutes.next_meeting_checks) == 1

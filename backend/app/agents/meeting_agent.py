@@ -72,12 +72,13 @@ def analyze(
     model: str | None = None,
     on_progress: Callable[[str, int, int], None] | None = None,
     chat: Callable[..., tuple] = llm_service.chat_json,
+    glossary: str = "",
 ) -> AnalysisResult:
     if not segments:
         raise llm_service.LLMError("전사문이 비어 있어 회의록을 만들 수 없습니다. 음성에 말소리가 있는지 확인하세요.")
     s = get_settings()
     model = model or s.llm_model
-    system = prompt_service.system_prompt()
+    system = prompt_service.system_prompt(glossary)
     fields = _meeting_fields(meeting)
     chunks = chunk_transcript(segments, s.llm_chunk_chars)
     calls, seconds = 0, 0.0

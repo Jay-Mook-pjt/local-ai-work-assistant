@@ -74,6 +74,7 @@ class JobOut(ORM):
     meeting_id: str
     status: JobStatus
     llm_model: str | None = None
+    retranscribe: bool | None = None
     progress: int
     message: str | None
     error: str | None
@@ -83,6 +84,8 @@ class JobOut(ORM):
 
 class AnalyzeRequest(BaseModel):
     llm_model: str | None = Field(default=None, max_length=200)
+    # Re-run speech recognition (e.g. after adding glossary terms) instead of reusing the transcript.
+    retranscribe: bool = False
     # Re-analysis replaces the minutes; edited minutes are only replaced when confirmed.
     overwrite_edited: bool = False
 
@@ -244,3 +247,40 @@ class SettingsOut(BaseModel):
 
 class SettingsUpdate(BaseModel):
     llm_model: str = Field(min_length=1, max_length=200)
+
+
+# ---- Glossary -----------------------------------------------------------------
+
+
+class GlossaryIn(BaseModel):
+    term: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=1000)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("term", "description")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("term")
+    @classmethod
+    def _term_not_blank(cls, v: str) -> str:
+        if not v:
+            raise ValueError("용어를 입력하세요.")
+        return v
+
+    @field_validator("aliases")
+    @classmethod
+    def _clean_aliases(cls, v: list[str]) -> list[str]:
+        v = _clean_list(v)
+        if any(len(a) > 100 for a in v):
+            raise ValueError("별칭은 100자 이내로 입력하세요.")
+        return list(dict.fromkeys(v))
+
+
+class GlossaryOut(ORM):
+    id: str
+    term: str
+    description: str
+    aliases: list[str]
+    updated_at: datetime
