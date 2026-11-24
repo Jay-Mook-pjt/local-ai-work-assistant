@@ -2,7 +2,7 @@
 
 Mac mini에서 동작하는 개인용 로컬 AI 업무 비서입니다. 회의 음성을 업로드하면 로컬 STT(MLX Whisper)와 로컬 LLM(Ollama)이 회의록을 만들고, 사용자가 검토·승인한 뒤에만 이메일로 발송합니다. 외부 AI API는 사용하지 않습니다.
 
-> 현재 진행 단계: **PHASE 1 — 프로젝트 초기화 완료**. 회의 업로드/분석/문서/메일 기능은 아직 구현되지 않았습니다.
+> 현재 진행 단계: **PHASE 2 — Frontend UI(Mock 데이터) 완료**. 화면과 흐름은 모두 동작하지만 회의 데이터는 브라우저(localStorage)에 저장되는 예시 데이터이며, 실제 업로드·음성 인식·AI 분석·DOCX·이메일은 PHASE 3~5에서 연결합니다.
 
 ## 실행 환경 (PHASE 0 점검 결과, 2026-11-23)
 
@@ -12,6 +12,7 @@ Mac mini에서 동작하는 개인용 로컬 AI 업무 비서입니다. 회의 �
 | OS | macOS 27.2.1 |
 | Homebrew | 7.0.15 (`/opt/homebrew`) |
 | Node.js / npm | 22.23.5 / 10.9.9 (`brew install node@22`, keg-only → `~/.zprofile`에 PATH 추가) |
+| Frontend | Next.js 16.4.6, React 19.3, Tailwind CSS 4.3, vitest 5 (단위 테스트) |
 | Python | 3.12.16 (uv 관리, 프로젝트 `.venv`), 시스템 Python 3.9는 사용하지 않음 |
 | uv | 0.13.9 |
 | ffmpeg | 9.0.2 |
@@ -49,6 +50,42 @@ local-ai-work-assistant/
 - `scripts/_common.sh` 추가 — 세 스크립트가 공유하는 경로/포트 설정.
 - **Frontend → Backend 연결은 Next.js rewrite**(`/api/*` → `http://127.0.0.1:8000/api/*`)로 처리합니다. Backend를 localhost에만 열어 두면서도 LAN의 다른 기기 브라우저가 Frontend를 통해 API를 쓸 수 있게 하기 위함입니다.
 
+## 화면 (PHASE 2)
+
+| 경로 | 화면 | 주요 기능 |
+|---|---|---|
+| `/` | 대시보드 | 전체·이번 달 회의 수, AI 처리 중, 미완료 후속 업무, 최근 회의, AI 처리 상태, 최근 후속 업무, 최근 문서, 빠른 생성 |
+| `/meetings` | 회의록 목록 | 제목·참석자·안건·회의 내용(회의록·전사문) 검색, 날짜 범위, 상태 필터 |
+| `/meetings/new` | 새 회의록 생성 | 제목·날짜·참석자·목적·안건(순서 변경)·AI 지시사항(프리셋), 음성 파일 드래그 앤 드롭, 형식·MIME·크기·파일명 검증, 길이 표시 |
+| `/meetings/[id]` | 회의 상세 | 처리 단계 진행 표시와 실패 시 재처리, 회의록 8개 섹션 보기·편집, 근거 발언·타임스탬프 → 전사문 이동, 전사문 검색·복사, 이메일 작성·미리보기, 회의 삭제(확인) |
+| `/history` | 이력 · 후속 업무 | 회의 전체 후속 업무 조회·상태 변경(담당자 필터), 월별 회의 타임라인, 이메일 발송 이력 |
+| `/settings` | 설정 | 실제 시스템 상태(`/api/health`), 설치된 Ollama 모델, 테마(라이트/다크/시스템), Mock 데이터 초기화 |
+
+- 좌측 Sidebar + 상단 Header, 모바일에서는 메뉴 버튼으로 여는 서랍형 Sidebar, 다크/라이트 모드.
+- 회의록에서 AI가 확인하지 못한 값은 노란색 **미확인** 표시로 구분합니다.
+- **아직 연결되지 않은 버튼**: `DOCX 생성·다운로드`, `발송`은 비활성 상태이며 버튼에 `(PHASE 5)`가 표시됩니다.
+- Mock 모드에서는 상단에 `Mock 데이터` 배지가 표시되고, 새 회의는 약 20초 동안 처리 단계가 시뮬레이션된 뒤 `[Mock]` 표시가 붙은 자리표시 회의록이 만들어집니다.
+
+### Frontend 코드 구조
+
+```
+frontend/src/
+├── app/                    페이지 (App Router)
+├── components/
+│   ├── layout/             AppShell, Sidebar, ThemeToggle
+│   ├── common/             ui.tsx(버튼·카드·배지·탭·대화상자 등), Icon, SystemStatus
+│   ├── meeting/            MeetingList, AudioDropzone, JobProgress, MinutesView, TranscriptView, EmailPanel, ListInput
+│   └── editor/             MinutesEditor
+├── services/
+│   ├── meetings.ts         모든 페이지가 쓰는 데이터 함수 (PHASE 3에서 fetch 구현으로 교체)
+│   ├── mockStore.ts        localStorage 기반 Mock 저장소와 처리 시뮬레이션
+│   ├── mockData.ts         예시 데이터
+│   └── api.ts              실제 Backend 호출 (/api/health)
+├── hooks/useAsync.ts       데이터 로딩·폴링
+├── lib/                    형식 변환, 업로드 검증, 이메일 초안 (+ *.test.ts)
+└── types/meeting.ts        Backend API와 맞출 도메인 타입
+```
+
 ## 처음 설정
 
 ```bash
@@ -74,7 +111,7 @@ scripts/stop.sh           # Backend/Frontend 중지 (Ollama는 건드리지 않�
 
 ```bash
 cd backend && .venv/bin/python -m pytest -q
-cd frontend && npx tsc --noEmit && npm run lint && npm run build
+cd frontend && npm test && npm run typecheck && npm run lint && npm run build
 ```
 
 ## 보안 원칙
@@ -89,7 +126,7 @@ cd frontend && npx tsc --noEmit && npm run lint && npm run build
 |---|---|---|
 | 0 | 개발환경 분석·설치 | ✅ 완료 |
 | 1 | 프로젝트 초기화 | ✅ 완료 |
-| 2 | Frontend UI (Mock) | ⏳ 예정 |
+| 2 | Frontend UI (Mock) | ✅ 완료 |
 | 3 | Backend API·DB·Worker | ⏳ 예정 |
 | 4 | Ollama·MLX Whisper 연동 | ⏳ 예정 |
 | 5 | DOCX·이메일 | ⏳ 예정 |
@@ -97,4 +134,5 @@ cd frontend && npx tsc --noEmit && npm run lint && npm run build
 | 7 | 로컬 운영(launchd, 백업) | ⏳ 예정 |
 
 ## 변경 이력
+- **PHASE 2** — 대시보드·회의 목록·생성·상세(회의록 보기/편집, 전사문, 이메일 미리보기)·이력·설정 화면, 반응형 레이아웃과 다크/라이트 모드, Backend API와 같은 형태의 Mock 데이터 계층(localStorage), 업로드 사전 검증, vitest 단위 테스트 26개. `@types/node`를 실행 환경(Node 22)에 맞춰 v22로 변경.
 - **PHASE 1** — 디렉터리 구조, FastAPI 기본 앱(`/api/health`: DB·Ollama·STT 점검), SQLite 엔진(WAL), 설정/로그, Next.js 초기화와 상태 점검 화면, 실행 스크립트, 단위 테스트 3개.

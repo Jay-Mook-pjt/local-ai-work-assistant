@@ -42,13 +42,13 @@ export function SystemStatus() {
   };
 
   return (
-    <section className="w-full max-w-xl rounded-xl border border-black/10 dark:border-white/15 p-6">
+    <section className="card p-5">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold">시스템 상태</h2>
+        <h2 className="text-sm font-semibold">시스템 상태</h2>
         <button
           onClick={load}
           disabled={loading}
-          className="text-sm rounded-md border border-black/15 dark:border-white/20 px-3 py-1 hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+          className="text-sm rounded-md border border-slate-300 dark:border-slate-700 px-3 py-1 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
         >
           {loading ? "확인 중…" : "다시 확인"}
         </button>
@@ -67,7 +67,7 @@ export function SystemStatus() {
               <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${c.ok ? "bg-emerald-500" : "bg-red-500"}`} />
               <div className="text-sm">
                 <div className="font-medium">{LABELS[key] ?? key}</div>
-                <div className="text-black/60 dark:text-white/60">
+                <div className="muted">
                   {[c.version && `v${c.version}`, c.latency_ms != null && `${c.latency_ms}ms`, c.detail]
                     .filter(Boolean)
                     .join(" · ") || (c.ok ? "정상" : "오류")}
@@ -75,7 +75,7 @@ export function SystemStatus() {
               </div>
             </li>
           ))}
-          <li className="pt-2 text-xs text-black/50 dark:text-white/50">
+          <li className="pt-2 text-xs muted">
             LLM 모델: {data.llm_model} · 환경: {data.env}
           </li>
         </ul>
