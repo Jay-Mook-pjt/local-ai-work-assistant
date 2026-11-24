@@ -1,0 +1,33 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data (meeting audio, transcripts, minutes are private)
+storage/**
+!storage/**/
+!storage/**/.gitkeep
+database/*
+!database/.gitkeep
+logs/*
+!logs/.gitkeep
+*.pid
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
