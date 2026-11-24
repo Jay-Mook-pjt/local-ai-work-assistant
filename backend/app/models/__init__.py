@@ -88,6 +88,7 @@ class Job(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     meeting_id: Mapped[str] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)
+    llm_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -105,6 +106,8 @@ class Transcript(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     meeting_id: Mapped[str] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"), unique=True)
+    # Which upload this transcript belongs to; a re-analysis of the same audio reuses it.
+    audio_file_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     language: Mapped[str] = mapped_column(String(10))
     model: Mapped[str] = mapped_column(String(200))
     segments: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
@@ -123,6 +126,8 @@ class MeetingMinutes(Base):
     open_issues: Mapped[list[str]] = mapped_column(JSON, default=list)
     next_meeting_checks: Mapped[list[str]] = mapped_column(JSON, default=list)
     llm_model: Mapped[str] = mapped_column(String(200), default="")
+    # Grounding-check findings shown to the user ("검토가 필요한 항목").
+    review_notes: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     edited: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
@@ -164,3 +169,13 @@ class EmailHistory(Base):
     status: Mapped[str] = mapped_column(String(10))  # SENT | FAILED
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+class AppSetting(Base):
+    """User-changeable runtime settings (e.g. the default LLM model), overriding .env."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)

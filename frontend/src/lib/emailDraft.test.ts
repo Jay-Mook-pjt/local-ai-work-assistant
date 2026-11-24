@@ -29,6 +29,7 @@ describe("buildEmailDraft", () => {
     open_issues: ["테스트 서버 증설 여부"],
     next_meeting_checks: [],
     llm_model: "qwen3:14b",
+    review_notes: [],
     edited: false,
     updated_at: "2026-11-20T06:00:00Z",
   };

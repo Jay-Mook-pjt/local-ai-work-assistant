@@ -30,6 +30,7 @@ export interface Job {
   id: string;
   meeting_id: string;
   status: JobStatus;
+  llm_model: string | null;
   /** 0–100 */
   progress: number;
   message: string | null;
@@ -104,6 +105,8 @@ export interface MeetingMinutes {
   open_issues: string[];
   next_meeting_checks: string[];
   llm_model: string;
+  /** Findings of the automatic grounding check — what the user should verify. */
+  review_notes: string[];
   edited: boolean;
   updated_at: string;
 }
@@ -165,4 +168,14 @@ export interface DashboardSummary {
   active_jobs: (Job & { meeting_title: string })[];
   recent_documents: (DocumentInfo & { meeting_title: string })[];
   recent_action_items: ActionItemWithMeeting[];
+}
+
+export interface AppSettings {
+  llm_model: string;
+  llm_model_source: "env" | "user";
+  available_models: string[];
+  stt_model: string;
+  stt_language: string;
+  max_upload_mb: number;
+  smtp_configured: boolean;
 }

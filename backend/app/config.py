@@ -33,8 +33,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     llm_model: str = "qwen3:14b"
     llm_temperature: float = 0.1
-    llm_num_ctx: int = 8192
-    llm_timeout_seconds: int = 600
+    llm_num_ctx: int = 16384
+    llm_timeout_seconds: int = 900
+    llm_keep_alive: str = "2m"
+    # Transcript characters per LLM analysis chunk (Korean ~1.5 chars/token).
+    llm_chunk_chars: int = Field(default=6000, ge=1000)
 
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
@@ -42,6 +45,9 @@ class Settings(BaseSettings):
 
     stt_model: str = "mlx-community/whisper-large-v3-turbo"
     stt_language: str = "ko"
+    # Long audio is transcribed in windows of this length, overlapping by stt_overlap_seconds.
+    stt_chunk_seconds: int = Field(default=600, ge=60)
+    stt_overlap_seconds: int = Field(default=10, ge=0, le=60)
 
     smtp_host: str = ""
     smtp_port: int = 587

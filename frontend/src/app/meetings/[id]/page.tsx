@@ -19,6 +19,7 @@ import {
 import { EmailPanel } from "@/components/meeting/EmailPanel";
 import { JobProgress } from "@/components/meeting/JobProgress";
 import { MinutesView } from "@/components/meeting/MinutesView";
+import { ReanalyzeDialog } from "@/components/meeting/ReanalyzeDialog";
 import { TranscriptView } from "@/components/meeting/TranscriptView";
 import { useAsync } from "@/hooks/useAsync";
 import { formatBytes, formatDate, formatDateTime, formatDuration, isProcessing } from "@/lib/format";
@@ -31,7 +32,7 @@ import {
   getTranscript,
   listDocuments,
   listEmailHistory,
-  retryAnalysis,
+  analyzeMeeting,
   updateMinutes,
 } from "@/services/meetings";
 import type { MeetingMinutes } from "@/types/meeting";
@@ -63,6 +64,8 @@ function MeetingDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [reanalyze, setReanalyze] = useState(false);
 
   const { data, error, loading, reload, setData } = useAsync(() => loadBundle(id), [id], {
     pollMs: 2000,
@@ -92,9 +95,12 @@ function MeetingDetail() {
 
   const retry = async () => {
     setRetrying(true);
+    setActionError(null);
     try {
-      await retryAnalysis(meeting.id);
+      await analyzeMeeting(meeting.id, { llm_model: job?.llm_model ?? undefined });
       reload();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
     } finally {
       setRetrying(false);
     }
@@ -102,8 +108,14 @@ function MeetingDetail() {
 
   const remove = async () => {
     setDeleting(true);
-    await deleteMeeting(meeting.id);
-    router.replace("/meetings");
+    try {
+      await deleteMeeting(meeting.id);
+      router.replace("/meetings");
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
   };
 
   return (
@@ -119,11 +131,24 @@ function MeetingDetail() {
           </span>
         }
         actions={
-          <Button variant="secondary" icon="trash" onClick={() => setConfirmDelete(true)}>
-            삭제
-          </Button>
+          <>
+            {meeting.audio && !isProcessing(meeting.status) && (
+              <Button variant="secondary" icon="refresh" onClick={() => setReanalyze(true)}>
+                다시 분석
+              </Button>
+            )}
+            <Button variant="secondary" icon="trash" onClick={() => setConfirmDelete(true)}>
+              삭제
+            </Button>
+          </>
         }
       />
+
+      {actionError && (
+        <div className="mb-4">
+          <Alert title={actionError} />
+        </div>
+      )}
 
       {notice && (
         <div className="mb-4">
@@ -227,6 +252,19 @@ function MeetingDetail() {
           </div>
         )}
       </div>
+
+      <ReanalyzeDialog
+        open={reanalyze}
+        meetingId={meeting.id}
+        currentModel={minutes?.llm_model ?? null}
+        edited={!!minutes?.edited}
+        hasTranscript={!!transcript}
+        onClose={() => setReanalyze(false)}
+        onQueued={() => {
+          setActionError(null);
+          reload();
+        }}
+      />
 
       <ConfirmDialog
         open={confirmDelete}

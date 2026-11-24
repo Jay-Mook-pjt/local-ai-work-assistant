@@ -40,10 +40,25 @@ function Evidence({ text, ts, onJump }: { text: string; ts: string; onJump?: (ts
   );
 }
 
+function ReviewNotes({ notes, edited }: { notes: string[]; edited: boolean }) {
+  if (!notes.length) return null;
+  return (
+    <details className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200" open={!edited}>
+      <summary className="cursor-pointer font-medium">검토가 필요한 항목 {notes.length}개 — AI 결과를 전사문과 대조해 자동으로 표시했습니다</summary>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+        {notes.map((n, i) => (
+          <li key={i}>{n}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 /** Read-only minutes in the same 8-section order as the DOCX export. */
 export function MinutesView({ meeting, minutes, onJump }: { meeting: Meeting; minutes: MeetingMinutes; onJump?: (ts: string) => void }) {
   return (
     <div className="space-y-7">
+      <ReviewNotes notes={minutes.review_notes} edited={minutes.edited} />
       <Section n={1} title="회의 개요">
         <dl className="grid grid-cols-[5rem_1fr] gap-y-1">
           <dt className="muted">회의명</dt>

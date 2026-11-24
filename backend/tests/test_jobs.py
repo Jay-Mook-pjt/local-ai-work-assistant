@@ -1,11 +1,14 @@
 import json
 import subprocess
 
+import pytest
+
 from app.config import get_settings
 from app.models import Job
 from app.services import job_service
 from app.services.media import find_binary
 from tests.conftest import make_meeting, upload
+from tests.fakes import TRANSCRIPT, FakeLLM
 from worker.main import run_once
 
 
@@ -40,9 +43,27 @@ def test_claim_is_exclusive(client, db, media_dir):
     assert job_service.claim_next(db, "w2") is None
 
 
-def test_worker_preprocesses_then_stops_before_stt(client, media_dir):
-    """PHASE 3: conversion runs for real; STT is not connected yet (PHASE 4)."""
-    m = make_meeting(client)
+@pytest.fixture
+def engines(monkeypatch):
+    """Fake Whisper (all TRANSCRIPT segments) + fake Ollama, wired into the real pipeline."""
+    from app.services import llm_service, stt_service
+
+    calls = {"stt": 0}
+
+    def whisper(audio, **kw):
+        calls["stt"] += 1
+        return {"segments": [dict(s, no_speech_prob=0.0, avg_logprob=-0.1, compression_ratio=1.1) for s in TRANSCRIPT]}
+
+    llm = FakeLLM()
+    monkeypatch.setattr(stt_service, "_mlx_transcribe", whisper)
+    monkeypatch.setattr(llm_service, "chat_json", llm)
+    monkeypatch.setattr(llm_service, "installed_models", lambda: ["qwen3:14b", "exaone3.5:7.8b"])
+    return calls, llm
+
+
+def test_full_pipeline_produces_grounded_minutes(client, media_dir, engines):
+    stt_calls, llm = engines
+    m = make_meeting(client, attendees=["이지은 대리"])
     upload(client, m["id"], media_dir / "clip.mp4", mime="video/mp4")  # video container → audio extracted
     job_id = client.post(f"/api/meetings/{m['id']}/analyze").json()["id"]
 
@@ -50,22 +71,78 @@ def test_worker_preprocesses_then_stops_before_stt(client, media_dir):
     assert run_once("test-worker") is False  # queue is empty
 
     job = client.get(f"/api/jobs/{job_id}").json()
-    assert job["status"] == "FAILED"
-    assert "PHASE 4" in job["error"] and "오디오 변환까지는 정상 완료" in job["error"]
-    assert client.get(f"/api/meetings/{m['id']}").json()["status"] == "FAILED"
+    assert job["status"] == "COMPLETED" and job["progress"] == 100, job
+    assert "검토가 필요한 항목" in job["message"] and job["llm_model"] == "qwen3:14b"
+    assert client.get(f"/api/meetings/{m['id']}").json()["status"] == "COMPLETED"
 
     processed = list((get_settings().storage_dir / "audio/processed" / m["id"]).glob("*.wav"))
-    assert len(processed) == 1
-    probe = subprocess.run(
+    stream = json.loads(subprocess.run(
         [find_binary("ffprobe"), "-v", "error", "-print_format", "json", "-show_streams", str(processed[0])],
         capture_output=True, text=True, check=True,
-    )
-    stream = json.loads(probe.stdout)["streams"][0]
+    ).stdout)["streams"][0]
     assert (stream["codec_name"], stream["sample_rate"], stream["channels"]) == ("pcm_s16le", "16000", 1)
 
-    # A failed job can be retried.
-    retry = client.post(f"/api/meetings/{m['id']}/analyze")
-    assert retry.status_code == 202 and retry.json()["id"] != job_id
+    t = client.get(f"/api/meetings/{m['id']}/transcript").json()
+    assert len(t["segments"]) == len(TRANSCRIPT) and t["model"] == get_settings().stt_model
+    assert (get_settings().storage_dir / "transcripts" / m["id"] / "transcript.txt").exists()
+
+    minutes = client.get(f"/api/meetings/{m['id']}/minutes").json()
+    assert minutes["llm_model"] == "qwen3:14b" and minutes["edited"] is False
+    assert [d["timestamp"] for d in minutes["decisions"]] == ["00:30:20"]
+    assert minutes["action_items"][0]["assignee"] == "이지은 대리"
+    assert any(x.startswith("[검증 필요]") for x in minutes["open_issues"])
+    assert any("결정사항 근거 없음" in n for n in minutes["review_notes"])
+    # Content search now reaches the transcript.
+    assert [x["id"] for x in client.get("/api/meetings", params={"q": "아홉 개"}).json()] == [m["id"]]
+    assert stt_calls["stt"] == 1
+
+
+def test_reanalysis_reuses_transcript_and_protects_edits(client, media_dir, engines):
+    stt_calls, llm = engines
+    m = make_meeting(client)
+    upload(client, m["id"], media_dir / "tone.wav", mime="audio/wav")
+    client.post(f"/api/meetings/{m['id']}/analyze")
+    run_once("w")
+    minutes = client.get(f"/api/meetings/{m['id']}/minutes").json()
+    client.put(f"/api/meetings/{m['id']}/minutes", json=minutes | {"meeting_summary": "직접 고친 요약"})
+
+    r = client.post(f"/api/meetings/{m['id']}/analyze", json={"llm_model": "exaone3.5:7.8b"})
+    assert r.status_code == 409 and "수정한 회의록" in r.json()["detail"]
+    assert client.post(f"/api/meetings/{m['id']}/analyze", json={"llm_model": "not-installed:1b", "overwrite_edited": True}).status_code == 422
+
+    r = client.post(f"/api/meetings/{m['id']}/analyze", json={"llm_model": "exaone3.5:7.8b", "overwrite_edited": True})
+    assert r.status_code == 202 and r.json()["llm_model"] == "exaone3.5:7.8b"
+    run_once("w")
+    assert stt_calls["stt"] == 1  # transcript reused
+    assert llm.calls[-1]["model"] == "exaone3.5:7.8b"
+    after = client.get(f"/api/meetings/{m['id']}/minutes").json()
+    assert after["llm_model"] == "exaone3.5:7.8b" and after["edited"] is False
+
+
+def test_llm_failure_is_reported_and_retryable(client, media_dir, engines, monkeypatch):
+    from app.services import llm_service
+
+    def down(**kw):
+        raise llm_service.LLMError("Ollama에 연결할 수 없습니다 (테스트).")
+
+    monkeypatch.setattr(llm_service, "chat_json", down)
+    m = make_meeting(client)
+    upload(client, m["id"], media_dir / "tone.wav", mime="audio/wav")
+    job_id = client.post(f"/api/meetings/{m['id']}/analyze").json()["id"]
+    run_once("w")
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "FAILED" and "Ollama" in job["error"]
+    assert client.get(f"/api/meetings/{m['id']}/transcript").json() is not None  # STT result kept
+    assert client.post(f"/api/meetings/{m['id']}/analyze").status_code == 202
+
+
+def test_settings_default_model(client, engines):
+    s = client.get("/api/settings").json()
+    assert s["llm_model"] == get_settings().llm_model and s["llm_model_source"] == "env"
+    assert "exaone3.5:7.8b" in s["available_models"]
+    assert client.put("/api/settings", json={"llm_model": "nope:1b"}).status_code == 422
+    s = client.put("/api/settings", json={"llm_model": "exaone3.5:7.8b"}).json()
+    assert (s["llm_model"], s["llm_model_source"]) == ("exaone3.5:7.8b", "user")
 
 
 def test_missing_source_file_fails_cleanly(client, media_dir):

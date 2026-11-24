@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import analysis, audio, health, jobs, meetings
+from app.api import analysis, audio, health, jobs, meetings, settings as settings_api
 from app.config import get_settings
 from app.db.session import init_db
 from app.logging_config import setup_logging
@@ -34,5 +34,5 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-for r in (health.router, meetings.router, audio.router, analysis.router, jobs.router):
+for r in (health.router, meetings.router, audio.router, analysis.router, jobs.router, settings_api.router):
     app.include_router(r)

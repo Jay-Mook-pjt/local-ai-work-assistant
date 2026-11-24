@@ -105,12 +105,15 @@ def minutes_out(db: Session, meeting_id: str) -> MinutesOut | None:
         open_issues=mn.open_issues,
         next_meeting_checks=mn.next_meeting_checks,
         llm_model=mn.llm_model,
+        review_notes=mn.review_notes or [],
         edited=mn.edited,
         updated_at=mn.updated_at,
     )
 
 
-def save_minutes(db: Session, meeting_id: str, data: MinutesUpdate, *, llm_model: str | None = None, edited: bool = True) -> MinutesOut:
+def save_minutes(
+    db: Session, meeting_id: str, data: MinutesUpdate, *, llm_model: str | None = None, edited: bool = True, review_notes: list[str] | None = None
+) -> MinutesOut:
     """Replace the minutes and action items. Existing action item ids are kept."""
     get_meeting(db, meeting_id)
     mn = db.scalar(select(MeetingMinutes).where(MeetingMinutes.meeting_id == meeting_id))
@@ -125,6 +128,8 @@ def save_minutes(db: Session, meeting_id: str, data: MinutesUpdate, *, llm_model
     mn.edited = edited
     if llm_model is not None:
         mn.llm_model = llm_model
+    if review_notes is not None:  # set by AI analysis; user edits keep the existing notes
+        mn.review_notes = review_notes
     mn.updated_at = datetime.now(UTC)
 
     existing = {a.id: a for a in db.scalars(select(ActionItem).where(ActionItem.meeting_id == meeting_id))}

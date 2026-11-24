@@ -2,7 +2,7 @@
 
 Mac mini에서 동작하는 개인용 로컬 AI 업무 비서입니다. 회의 음성을 업로드하면 로컬 STT(MLX Whisper)와 로컬 LLM(Ollama)이 회의록을 만들고, 사용자가 검토·승인한 뒤에만 이메일로 발송합니다. 외부 AI API는 사용하지 않습니다.
 
-> 현재 진행 단계: **PHASE 3 — Backend(API·DB·Worker) 완료**. 회의 등록·음성 업로드·작업 대기열·오디오 변환·회의록 편집·후속 업무·삭제가 실제 SQLite와 파일 저장소로 동작합니다. **음성 인식(MLX Whisper)과 AI 분석(Ollama)은 PHASE 4에서 연결**하므로, 지금은 분석을 시작하면 오디오 변환까지 진행된 뒤 "PHASE 4에서 연결됩니다" 오류로 멈춥니다(다시 처리 가능). DOCX·이메일은 PHASE 5.
+> 현재 진행 단계: **PHASE 4 — AI 엔진 연동 완료**. 음성 업로드 → MLX Whisper 음성 인식 → Ollama 회의 분석 → 근거 검증 → 회의록 생성까지 실제로 동작합니다. DOCX 생성·이메일 발송은 PHASE 5에서 연결합니다.
 
 ## 실행 환경 (PHASE 0 점검 결과, 2026-11-23)
 
@@ -23,12 +23,12 @@ Mac mini에서 동작하는 개인용 로컬 AI 업무 비서입니다. 회의 �
 
 | 용도 | 모델 | 비고 |
 |---|---|---|
-| LLM 기본 | `qwen3:14b` (9.3GB) | 짧은 샘플 비교에서 결정사항·담당자·기한·타임스탬프 추출이 가장 정확 |
-| LLM 비교 | `exaone3.5:7.8b` (4.8GB) | 가장 빠름(46 tok/s), 요약에 약간의 덧붙임 경향 |
-| LLM 비교 | `gemma3:12b` (8.2GB) | 결정사항 누락 경향 |
+| LLM 기본 | `qwen3:14b` (9.3GB, 실행 시 약 9.8GB) | 전사문에 없는 숫자를 만들지 않았고 결정·담당자·기한이 정확. 담당 미정 업무를 미결 사항으로만 분류하는 경향 |
+| LLM 비교 | `exaone3.5:7.8b` (4.8GB) | 가장 빠름(약 46 tok/s). 담당 미정 업무까지 잘 잡지만 요약에 계산한 수치("90%")를 넣고 담당자를 놓친 경우 있음 |
+| LLM 비교 | `gemma3:12b` (8.2GB) | 업무 추출은 양호하나 요약에 없는 수치("21건")를 만들고 논의 타임스탬프를 비움 |
 | STT | `mlx-community/whisper-large-v3-turbo` | 한국어 샘플 정확 인식, 문장별 타임스탬프 |
 
-모델은 `.env`의 `LLM_MODEL`, `STT_MODEL`로 바꿀 수 있습니다. 24GB 메모리에서 STT와 LLM은 동시에 올리지 않고 순차 실행합니다.
+비교는 139초 분량의 합성 한국어 회의(3인, 결정·미결·담당자 지정/미지정 업무 포함)로 같은 전사문에 대해 수행했습니다(2026-11-24). 기본 LLM은 설정 화면이나 `.env`의 `LLM_MODEL`로, 회의별로는 상세 화면의 "다시 분석"으로 바꿀 수 있습니다. 24GB 메모리에서 STT와 LLM은 동시에 올리지 않고 순차 실행합니다(Whisper 모델은 STT가 끝나면 메모리에서 내립니다).
 
 ## 구조
 
@@ -98,7 +98,7 @@ frontend/src/
 | GET | `/api/meetings?q=&from=&to=&status=` | 회의 목록 (제목·목적·참석자·안건·전사문·회의록·후속 업무 내용 검색) |
 | GET / DELETE | `/api/meetings/{id}` | 회의 조회 / 삭제 (DB 행과 저장된 모든 파일 삭제, 처리 중이면 409) |
 | POST | `/api/meetings/{id}/audio` | 음성 업로드 (multipart `file`) |
-| POST | `/api/meetings/{id}/analyze` | 분석 작업 등록 (실패 후 재시도도 동일, 처리 중이면 409) |
+| POST | `/api/meetings/{id}/analyze` | 분석 작업 등록. 본문(선택) `{"llm_model": "...", "overwrite_edited": false}`. 같은 음성의 전사문이 있으면 재사용하고 AI 분석만 다시 실행. 직접 수정한 회의록이 있으면 `overwrite_edited: true` 없이는 409 |
 | GET | `/api/jobs/{id}` | 작업 상태 |
 | GET | `/api/meetings/{id}/transcript` | STT 결과 (없으면 `null`) |
 | GET / PUT | `/api/meetings/{id}/minutes` | 회의록 조회 / 수정 (후속 업무 포함, 기존 업무 id 유지) |
@@ -106,13 +106,14 @@ frontend/src/
 | GET | `/api/action-items?status=OPEN\|PENDING\|IN_PROGRESS\|DONE&assignee=` | 전체 후속 업무 |
 | GET | `/api/meetings/{id}/documents`, `/api/meetings/{id}/emails`, `/api/emails` | 문서·발송 이력 (PHASE 5부터 기록) |
 | GET | `/api/dashboard` | 대시보드 집계 |
+| GET / PUT | `/api/settings` | 기본 LLM 모델 조회·변경(설치된 모델만 허용), 설치 모델 목록, STT·업로드·SMTP 설정 요약 |
 | GET | `/api/health` | DB·Ollama·STT 상태 |
 
 `POST /export`, `/email/preview`, `/email/send`는 PHASE 5에서 추가합니다. 동작하지 않는 엔드포인트는 미리 만들지 않았습니다. API 문서: <http://127.0.0.1:8000/docs> (이 Mac에서만 접속 가능).
 
 ### 데이터베이스 (SQLite, `database/meeting.db`)
 
-`meetings`, `audio_files`, `jobs`, `transcripts`, `meeting_minutes`, `action_items`, `email_history`, `documents`. WAL 모드로 API와 Worker가 함께 사용합니다. JSON 컬럼은 한글을 그대로 저장해 검색이 가능합니다.
+`meetings`, `audio_files`, `jobs`, `transcripts`, `meeting_minutes`, `action_items`, `email_history`, `documents`, `app_settings`. WAL 모드로 API와 Worker가 함께 사용합니다. JSON 컬럼은 한글을 그대로 저장해 검색이 가능합니다. 나중에 추가된 nullable 컬럼은 시작 시 자동으로 `ALTER TABLE ADD COLUMN` 됩니다(데이터 삭제 없음).
 
 ### 음성 업로드 검증
 1. 파일명은 표시용으로만 저장합니다(경로 부분·제어 문자 제거). 실제 저장 파일명은 서버가 만든 ID입니다: `storage/audio/original/<회의ID>/<파일ID>.<확장자>`.
@@ -122,8 +123,39 @@ frontend/src/
 
 ### 작업 대기열 · Worker
 - `POST /analyze`가 `jobs`에 `PENDING` 행을 추가하고, Worker(`python -m worker.main`)가 2초마다 확인해 하나씩 처리합니다. 작업을 가져갈 때 조건부 UPDATE를 써서 같은 작업이 두 번 처리되지 않습니다.
-- 처리 단계: `PREPROCESSING`(ffmpeg로 16kHz 모노 WAV 변환, `storage/audio/processed/`) → `TRANSCRIBING` → `ANALYZING` → `GENERATING` → `COMPLETED`. **PHASE 3에서는 PREPROCESSING까지 구현**되어 있습니다.
+- 처리 단계: `PREPROCESSING`(ffmpeg로 16kHz 모노 WAV 변환) → `TRANSCRIBING`(MLX Whisper) → `ANALYZING`(Ollama 구간 분석) → `GENERATING`(통합·근거 검증·저장) → `COMPLETED`.
 - 실패하면 원인을 `jobs.error`에 기록하고 화면에서 "다시 처리"로 재시도할 수 있습니다. Worker가 처리 도중 종료되면 다음 시작 시 해당 작업을 실패로 표시합니다.
+
+## AI 처리 (PHASE 4)
+
+### 음성 인식 — `app/services/stt_service.py`
+- `mlx-community/whisper-large-v3-turbo`, 한국어 고정. 실측 속도: 139초 음성을 약 3~4초(실시간 대비 30~40배).
+- 긴 음성은 `STT_CHUNK_SECONDS`(기본 600초) 단위로 나누고 `STT_OVERLAP_SECONDS`(기본 10초)씩 겹쳐 인식합니다. 겹친 구간은 경계의 중간 지점을 기준으로 한쪽 결과만 남겨 문장 중복·누락을 막습니다.
+- 회의 제목·안건·참석자를 Whisper 초기 프롬프트로 넣어 전문 용어·이름 인식을 돕습니다.
+- 장시간 오디오에서 같은 문장이 반복되는 현상을 막기 위해 앞 문장 조건부 디코딩을 끄고, 무음 구간의 대표적인 환각 문구("시청해 주셔서 감사합니다" 등)·반복 출력·무음 판정 구간을 제거합니다.
+- 결과는 DB(`transcripts`)와 `storage/transcripts/<회의ID>/transcript.txt`에 저장됩니다.
+
+### 회의 분석 — `app/agents/`
+1. **구간 분석**(`meeting_agent.py`): 전사문을 `[시:분:초] 문장` 형태로 만들어 `LLM_CHUNK_CHARS`(기본 6000자) 단위로 문장 경계에서 나눕니다. 짧은 회의는 한 번의 호출로, 긴 회의는 구간별로 분석한 뒤 구조화된 추출 결과만 모아 한 번 더 통합합니다(전체 전사문을 한 번에 보내지 않음). 각 구간 앞에는 이전 구간의 마지막 2문장을 문맥으로 붙입니다.
+2. **구조화 출력**(`llm_service.py`): Ollama에 JSON 스키마를 `format`으로 지정하고(thinking 끔) Pydantic으로 검증합니다. 형식 오류 시 1회 재시도합니다. 모든 호출은 `logs/llm_calls.log`에 모델·소요 시간·토큰 수·성공 여부가 JSON 한 줄로 기록됩니다.
+3. **근거 검증**(`review_agent.py`): AI 결과를 전사문과 대조합니다.
+   - 결정사항·후속 업무의 근거 인용문을 전사문에서 찾아 **타임스탬프를 실제 문장 위치로 교체**합니다. 근거를 못 찾은 결정사항은 결정에서 빼고 미결 사항에 `[검증 필요]`로 옮깁니다.
+   - 담당자·기한은 전사문에 실제로 나온 경우에만 남기고, 아니면 `미확인`으로 바꿉니다.
+   - 업무 배정("누가 언제까지")이 결정사항에도 들어가면 결정사항에서 제외합니다.
+   - 요약·논의·미결 문장에 전사문에 없는 **숫자**가 있으면 표시합니다(한글 수사 "열두", "스물세", "십이월"도 인식).
+   - 화자 분리가 없으므로 발언자는 항상 `미확인`. 논의가 없었던 안건은 "논의가 확인되지 않음"으로 명시합니다.
+4. **후속 업무 정리**(`task_agent.py`): 중복 업무 병합, 담당자를 등록된 참석자 이름으로 맞춤, STT가 참석자 이름을 한 글자 다르게 인식한 경우(예: 이지은→이지훈) 참석자 이름으로 보정(근거 인용문은 원문 유지).
+5. 검증 결과는 회의록의 `review_notes`로 저장되어 화면에 **"검토가 필요한 항목"**으로 표시됩니다.
+
+프롬프트는 `app/prompts/<이름>_v<N>.md` 파일로 관리하며, 사용 버전은 `app/services/prompt_service.py`의 `PROMPT_VERSIONS`에서 정합니다(현재 system v2, 나머지 v1).
+
+### 모델 비교 방법
+회의 상세 → **다시 분석** → 모델 선택. 같은 음성이면 전사문을 재사용해 LLM 단계만 실행합니다. 결과 회의록에는 사용한 모델명이 표시됩니다. 직접 수정한 회의록은 덮어쓰기 확인 후에만 바뀝니다.
+
+### 알려진 한계
+- 화자 분리(누가 말했는지)는 지원하지 않습니다. 담당자는 발언 내용("박정우 책임님이…")으로만 판단합니다.
+- 논의사항 요약 문장 자체는 근거 인용이 없어 자동 검증이 숫자 확인에 한정됩니다. 최종 회의록은 사용자가 검토·수정하는 것을 전제로 합니다.
+- 실측 처리 시간(qwen3:14b): 2분 회의 약 35~40초(한 번 호출), 구간 분석 경로는 구간당 20~35초 + 통합 약 40초.
 
 ## 처음 설정
 
@@ -167,12 +199,13 @@ cd frontend && npm test && npm run typecheck && npm run lint && npm run build
 | 1 | 프로젝트 초기화 | ✅ 완료 |
 | 2 | Frontend UI (Mock) | ✅ 완료 |
 | 3 | Backend API·DB·Worker | ✅ 완료 (STT·LLM 단계 제외) |
-| 4 | Ollama·MLX Whisper 연동 | ⏳ 예정 |
+| 4 | Ollama·MLX Whisper 연동 | ✅ 완료 |
 | 5 | DOCX·이메일 | ⏳ 예정 |
 | 6 | 통합 테스트 | ⏳ 예정 |
 | 7 | 로컬 운영(launchd, 백업) | ⏳ 예정 |
 
 ## 변경 이력
+- **PHASE 4** — MLX Whisper 음성 인식(구간 분할·오버랩·환각 필터·초기 프롬프트), Ollama 구조화 출력 클라이언트(호출 로그·재시도·오류 메시지), Meeting Agent(구간 분석→통합), 근거 검증(타임스탬프 교정·담당자/기한/숫자 확인·업무 배정 분리·이름 보정), 검토 항목 화면 표시, 기본 모델 설정 API·화면, 다른 모델로 다시 분석(전사문 재사용·수정본 보호), DB 컬럼 자동 추가, 프롬프트 버전 관리, pytest 73개, 실제 한국어 회의 음성으로 3개 모델 비교.
 - **PHASE 3** — SQLAlchemy 모델 8개 테이블, 회의·업로드·분석·작업·전사문·회의록·후속 업무·대시보드 API, 다단계 업로드 검증, SQLite 작업 대기열과 Worker(ffmpeg 전처리), 회의 삭제 시 파일 삭제, Frontend Mock 제거 및 실제 API 연결(업로드 진행률 표시), 대용량 업로드용 스트리밍 Route Handler, rewrite를 `fallback`으로 변경, 스크립트에 Worker 추가, pytest 40개.
 - **PHASE 2** — 대시보드·회의 목록·생성·상세(회의록 보기/편집, 전사문, 이메일 미리보기)·이력·설정 화면, 반응형 레이아웃과 다크/라이트 모드, Backend API와 같은 형태의 Mock 데이터 계층(localStorage), 업로드 사전 검증, vitest 단위 테스트 26개. `@types/node`를 실행 환경(Node 22)에 맞춰 v22로 변경.
 - **PHASE 1** — 디렉터리 구조, FastAPI 기본 앱(`/api/health`: DB·Ollama·STT 점검), SQLite 엔진(WAL), 설정/로그, Next.js 초기화와 상태 점검 화면, 실행 스크립트, 단위 테스트 3개.

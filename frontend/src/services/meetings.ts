@@ -2,6 +2,7 @@
 import { NotFoundError, request, uploadWithProgress } from "@/services/api";
 import type {
   ActionItemWithMeeting,
+  AppSettings,
   ActionStatus,
   DashboardSummary,
   DocumentInfo,
@@ -61,8 +62,16 @@ export async function createMeeting(
 
 export const getJob = (id: string) => request<Job>(`/api/jobs/${enc(id)}`);
 
-/** Re-queues the pipeline (after a failure). */
-export const retryAnalysis = (meetingId: string) => request<Job>(`/api/meetings/${enc(meetingId)}/analyze`, { method: "POST" });
+/**
+ * Queues (re-)analysis. Reuses the existing transcript when the audio is unchanged,
+ * so re-running with another model only repeats the LLM step.
+ */
+export const analyzeMeeting = (meetingId: string, opts: { llm_model?: string; overwrite_edited?: boolean } = {}) =>
+  request<Job>(`/api/meetings/${enc(meetingId)}/analyze`, { method: "POST", json: opts });
+
+export const getSettings = () => request<AppSettings>("/api/settings");
+
+export const updateSettings = (llm_model: string) => request<AppSettings>("/api/settings", { method: "PUT", json: { llm_model } });
 
 export const getTranscript = (meetingId: string) => request<Transcript | null>(`/api/meetings/${enc(meetingId)}/transcript`);
 

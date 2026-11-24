@@ -20,11 +20,11 @@ def active_job(db: Session, meeting_id: str) -> Job | None:
     return db.scalar(select(Job).where(Job.meeting_id == meeting_id, Job.status.in_(ACTIVE_JOB_STATUSES)))
 
 
-def enqueue(db: Session, meeting: Meeting) -> Job:
+def enqueue(db: Session, meeting: Meeting, llm_model: str | None = None) -> Job:
     """Queue an analysis job. Raises JobConflictError if one is already running."""
     if active_job(db, meeting.id):
         raise JobConflictError("이미 처리 중인 작업이 있습니다.")
-    job = Job(meeting_id=meeting.id, status="PENDING", progress=0, message="처리 대기 중")
+    job = Job(meeting_id=meeting.id, status="PENDING", progress=0, message="처리 대기 중", llm_model=llm_model)
     db.add(job)
     db.flush()
     meeting.status = "PENDING"

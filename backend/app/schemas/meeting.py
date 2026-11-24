@@ -73,11 +73,18 @@ class JobOut(ORM):
     id: str
     meeting_id: str
     status: JobStatus
+    llm_model: str | None = None
     progress: int
     message: str | None
     error: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class AnalyzeRequest(BaseModel):
+    llm_model: str | None = Field(default=None, max_length=200)
+    # Re-analysis replaces the minutes; edited minutes are only replaced when confirmed.
+    overwrite_edited: bool = False
 
 
 # ---- Transcript ---------------------------------------------------------------
@@ -162,6 +169,7 @@ class MinutesOut(BaseModel):
     open_issues: list[str]
     next_meeting_checks: list[str]
     llm_model: str
+    review_notes: list[str] = Field(default_factory=list)
     edited: bool
     updated_at: datetime
 
@@ -216,3 +224,20 @@ class DashboardOut(BaseModel):
     active_jobs: list[ActiveJobOut]
     recent_documents: list[RecentDocumentOut]
     recent_action_items: list[ActionItemWithMeeting]
+
+
+# ---- Settings -----------------------------------------------------------------
+
+
+class SettingsOut(BaseModel):
+    llm_model: str
+    llm_model_source: Literal["env", "user"]
+    available_models: list[str]
+    stt_model: str
+    stt_language: str
+    max_upload_mb: int
+    smtp_configured: bool
+
+
+class SettingsUpdate(BaseModel):
+    llm_model: str = Field(min_length=1, max_length=200)

@@ -1,6 +1,7 @@
 """SQLAlchemy engine/session. Tables are added in PHASE 3."""
 
 import json
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -52,3 +53,22 @@ def init_db() -> None:
     import app.models  # noqa: F401, PLC0415  (registers tables on Base.metadata)
 
     Base.metadata.create_all(bind=engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """Minimal forward migration: adds nullable columns introduced after a table was
+    created (create_all never alters existing tables). Data is never dropped."""
+    from sqlalchemy import inspect, text  # noqa: PLC0415
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            existing = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in existing and col.nullable:
+                    ddl = col.type.compile(dialect=engine.dialect)
+                    conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl}'))
+                    logging.getLogger(__name__).info("Added column %s.%s", table.name, col.name)
