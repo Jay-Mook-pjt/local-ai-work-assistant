@@ -199,7 +199,7 @@ def dashboard(db: Session) -> DashboardOut:
         open_action_items=db.scalar(select(func.count()).select_from(ActionItem).where(ActionItem.status != "DONE")) or 0,
         recent_meetings=[MeetingOut.model_validate(m) for m in db.scalars(select(Meeting).options(selectinload(Meeting.audio)).order_by(Meeting.created_at.desc()).limit(5))],
         active_jobs=[ActiveJobOut(meeting_title=titles.get(j.meeting_id, "-"), **_job_dict(j)) for j in active],
-        recent_documents=[RecentDocumentOut(meeting_title=titles.get(d.meeting_id, "-"), meeting_id=d.meeting_id, filename=d.filename, size_bytes=d.size_bytes, created_at=d.created_at) for d in docs],
+        recent_documents=[RecentDocumentOut(meeting_title=titles.get(d.meeting_id, "-"), id=d.id, meeting_id=d.meeting_id, filename=d.filename, size_bytes=d.size_bytes, created_at=d.created_at) for d in docs],
         recent_action_items=list_action_items(db, status="OPEN", limit=6),
     )
 

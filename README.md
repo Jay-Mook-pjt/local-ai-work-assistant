@@ -2,7 +2,7 @@
 
 Mac mini에서 동작하는 개인용 로컬 AI 업무 비서입니다. 회의 음성을 업로드하면 로컬 STT(MLX Whisper)와 로컬 LLM(Ollama)이 회의록을 만들고, 사용자가 검토·승인한 뒤에만 이메일로 발송합니다. 외부 AI API는 사용하지 않습니다.
 
-> 현재 진행 단계: **PHASE 4 — AI 엔진 연동 완료**. 음성 업로드 → MLX Whisper 음성 인식 → Ollama 회의 분석 → 근거 검증 → 회의록 생성까지 실제로 동작합니다. DOCX 생성·이메일 발송은 PHASE 5에서 연결합니다.
+> 현재 진행 단계: **PHASE 5 — DOCX·이메일 완료**. 음성 업로드부터 AI 회의록 생성, 검토·수정, DOCX 생성·다운로드, 이메일 미리보기·승인 발송까지 MVP 흐름이 동작합니다. 이메일을 실제로 보내려면 아래 '이메일 발송 설정'으로 SMTP 계정을 입력해야 합니다.
 
 ## 실행 환경 (PHASE 0 점검 결과, 2026-11-23)
 
@@ -104,12 +104,18 @@ frontend/src/
 | GET / PUT | `/api/meetings/{id}/minutes` | 회의록 조회 / 수정 (후속 업무 포함, 기존 업무 id 유지) |
 | PATCH | `/api/meetings/{id}/action-items/{item_id}` | 후속 업무 상태 변경 |
 | GET | `/api/action-items?status=OPEN\|PENDING\|IN_PROGRESS\|DONE&assignee=` | 전체 후속 업무 |
-| GET | `/api/meetings/{id}/documents`, `/api/meetings/{id}/emails`, `/api/emails` | 문서·발송 이력 (PHASE 5부터 기록) |
+| GET | `/api/meetings/{id}/documents`, `/api/meetings/{id}/emails`, `/api/emails` | 문서·발송 이력 |
+| POST | `/api/meetings/{id}/export` | 현재 회의록으로 DOCX 생성 |
+| GET / DELETE | `/api/documents/{doc_id}/download`, `/api/documents/{doc_id}` | DOCX 다운로드(한글 파일명) / 삭제 |
+| GET | `/api/meetings/{id}/email/draft` | 회의록 기반 메일 제목·본문 초안, SMTP 준비 상태 |
+| POST | `/api/meetings/{id}/email/preview` | 보낼 내용 그대로의 미리보기 + `content_hash` (발송·파일 생성 없음) |
+| POST | `/api/meetings/{id}/email/send` | `confirm: true`와 미리보기의 `content_hash`가 있어야 발송. 내용·회의록이 바뀌었으면 409 |
+| POST | `/api/email/test-connection` | SMTP 로그인만 확인 (발송 없음) |
 | GET | `/api/dashboard` | 대시보드 집계 |
 | GET / PUT | `/api/settings` | 기본 LLM 모델 조회·변경(설치된 모델만 허용), 설치 모델 목록, STT·업로드·SMTP 설정 요약 |
 | GET | `/api/health` | DB·Ollama·STT 상태 |
 
-`POST /export`, `/email/preview`, `/email/send`는 PHASE 5에서 추가합니다. 동작하지 않는 엔드포인트는 미리 만들지 않았습니다. API 문서: <http://127.0.0.1:8000/docs> (이 Mac에서만 접속 가능).
+API 문서: <http://127.0.0.1:8000/docs> (이 Mac에서만 접속 가능).
 
 ### 데이터베이스 (SQLite, `database/meeting.db`)
 
@@ -157,11 +163,51 @@ frontend/src/
 - 논의사항 요약 문장 자체는 근거 인용이 없어 자동 검증이 숫자 확인에 한정됩니다. 최종 회의록은 사용자가 검토·수정하는 것을 전제로 합니다.
 - 실측 처리 시간(qwen3:14b): 2분 회의 약 35~40초(한 번 호출), 구간 분석 경로는 구간당 20~35초 + 통합 약 40초.
 
+## 문서 · 이메일 (PHASE 5)
+
+### DOCX — `app/services/document_service.py`
+- A4, 맑은 고딕(Windows Word 기준, Mac Word는 Apple SD 고딕으로 대체), 8개 섹션: 회의 개요(요약 포함) · 회의 목적 · 참석자 · 주요 논의사항(표, 시각) · 의사결정 사항(근거 인용·시각) · 담당자별 후속 업무(표) · 미결 사항 · 다음 회의 확인사항.
+- `미확인`은 주황색으로 표시해 실제 값과 구분합니다. 표는 고정 너비·테두리를 문서에 직접 지정해 뷰어마다 모양이 달라지지 않게 했습니다.
+- 파일: `storage/exports/<회의ID>/<문서ID>.docx`, 다운로드 이름 `YYYYMMDD_<제목>_회의록.docx`. 생성할 때마다 새 버전이 쌓이며 화면에서 개별 삭제할 수 있습니다.
+
+### 이메일 — `app/services/email_service.py`
+흐름: **작성 → 미리보기(서버가 보낼 내용 그대로 생성) → 발송 버튼 → 확인 창 → 발송**.
+- 미리보기는 수신자·제목·본문·첨부 여부·회의록 수정 시각으로 `content_hash`를 만듭니다. 발송 요청은 같은 해시와 `confirm: true`가 있어야 처리되므로, 사용자가 보지 않은 내용은 발송되지 않습니다. 미리보기 후 회의록이 수정되면 발송이 거부되고 다시 미리보기를 요구합니다.
+- AI(Worker)는 발송 기능을 호출하지 않습니다. 발송은 화면의 버튼으로만 이루어집니다.
+- 수신자 형식·중복·최대 50명, 제목·주소의 줄바꿈(헤더 주입) 차단. 첨부 DOCX는 발송 시점의 회의록으로 생성되어 문서 목록에도 남습니다.
+- 결과(성공/실패와 원인)는 `email_history`에 기록되어 회의 상세와 이력 화면에 표시됩니다.
+
+### 이메일 발송 설정
+`.env`에 입력한 뒤 `scripts/stop.sh && scripts/start.sh`로 재시작합니다.
+
+```
+SMTP_HOST=smtp.gmail.com        # Microsoft 365: smtp.office365.com
+SMTP_PORT=587                   # 465면 SSL 자동 사용
+SMTP_USE_TLS=true
+SMTP_USERNAME=me@example.com
+SMTP_FROM=me@example.com
+SMTP_FROM_NAME=AI 회의록 비서
+```
+
+비밀번호(Gmail은 [앱 비밀번호](https://myaccount.google.com/apppasswords))는 둘 중 하나로 넣습니다.
+- `.env`의 `SMTP_PASSWORD=` (파일은 Git에 포함되지 않음)
+- 또는 macOS 키체인에 저장하고 `.env`에는 서비스 이름만 지정 (권장):
+
+```bash
+security add-generic-password -s local-ai-work-assistant-smtp -a me@example.com -w
+```
+
+```
+SMTP_KEYCHAIN_SERVICE=local-ai-work-assistant-smtp
+```
+
+설정 화면의 **SMTP 연결 테스트**로 로그인만 확인할 수 있습니다(메일은 보내지 않음).
+
 ## 처음 설정
 
 ```bash
 cp .env.example .env            # 이미 있으면 생략. SMTP 값은 PHASE 5에서 입력
-cd backend && uv venv -p 3.12 .venv && uv pip install -p .venv/bin/python -r requirements.txt
+cd backend && uv venv -p 3.12 .venv && uv pip install -p .venv/bin/python -r requirements-dev.txt   # 운영만: requirements.txt
 cd ../frontend && npm install
 ```
 
@@ -181,7 +227,7 @@ scripts/stop.sh           # Frontend/Worker/Backend 중지 (Ollama는 건드리�
 ## 테스트
 
 ```bash
-cd backend && .venv/bin/python -m pytest -q     # 임시 DB·저장소 사용, ffmpeg로 실제 MP3/WAV/M4A/MP4 생성해 검증
+cd backend && .venv/bin/python -m pytest -q     # 임시 DB·저장소, ffmpeg로 만든 실제 음성, 로컬 SMTP 서버(aiosmtpd)로 검증
 cd frontend && npm test && npm run typecheck && npm run lint && npm run build
 ```
 
@@ -189,7 +235,9 @@ cd frontend && npm test && npm run typecheck && npm run lint && npm run build
 - 외부 AI API 미사용, 모든 음성·텍스트는 이 Mac에서만 처리
 - Ollama·Backend는 `127.0.0.1` 바인딩, Frontend만 LAN 노출, 포트포워딩 없음
 - `.env`, `storage/`, `database/`, `logs/`는 Git에 포함하지 않음
-- 이메일은 사용자가 미리보기 후 발송 버튼을 눌렀을 때만 전송
+- 이메일은 사용자가 미리보기 후 발송 버튼을 누르고 확인했을 때만 전송, 미리보기 이후 내용이 바뀌면 발송 거부
+- SMTP 비밀번호는 `.env` 또는 macOS 키체인에만 저장하며 API·화면·로그에 노출하지 않음
+- 회의 삭제 시 음성·전사문·DOCX 파일 모두 삭제, DOCX는 개별 삭제 가능
 
 ## 진행 현황
 
@@ -200,11 +248,12 @@ cd frontend && npm test && npm run typecheck && npm run lint && npm run build
 | 2 | Frontend UI (Mock) | ✅ 완료 |
 | 3 | Backend API·DB·Worker | ✅ 완료 (STT·LLM 단계 제외) |
 | 4 | Ollama·MLX Whisper 연동 | ✅ 완료 |
-| 5 | DOCX·이메일 | ⏳ 예정 |
+| 5 | DOCX·이메일 | ✅ 완료 (실제 발송은 SMTP 계정 입력 필요) |
 | 6 | 통합 테스트 | ⏳ 예정 |
 | 7 | 로컬 운영(launchd, 백업) | ⏳ 예정 |
 
 ## 변경 이력
+- **PHASE 5** — DOCX 생성(8개 섹션, 고정 표 레이아웃, 미확인 강조)·다운로드(한글 파일명)·삭제, 이메일 초안·서버 미리보기·해시 기반 승인 발송·발송 이력, SMTP STARTTLS/SSL·키체인 비밀번호·연결 테스트, 화면의 문서·이메일 패널과 발송 확인 창, 설정 화면 SMTP 연결 테스트, 메일 초안 생성을 Backend로 이전, aiosmtpd 개발 의존성(requirements-dev.txt), pytest 89개.
 - **PHASE 4** — MLX Whisper 음성 인식(구간 분할·오버랩·환각 필터·초기 프롬프트), Ollama 구조화 출력 클라이언트(호출 로그·재시도·오류 메시지), Meeting Agent(구간 분석→통합), 근거 검증(타임스탬프 교정·담당자/기한/숫자 확인·업무 배정 분리·이름 보정), 검토 항목 화면 표시, 기본 모델 설정 API·화면, 다른 모델로 다시 분석(전사문 재사용·수정본 보호), DB 컬럼 자동 추가, 프롬프트 버전 관리, pytest 73개, 실제 한국어 회의 음성으로 3개 모델 비교.
 - **PHASE 3** — SQLAlchemy 모델 8개 테이블, 회의·업로드·분석·작업·전사문·회의록·후속 업무·대시보드 API, 다단계 업로드 검증, SQLite 작업 대기열과 Worker(ffmpeg 전처리), 회의 삭제 시 파일 삭제, Frontend Mock 제거 및 실제 API 연결(업로드 진행률 표시), 대용량 업로드용 스트리밍 Route Handler, rewrite를 `fallback`으로 변경, 스크립트에 Worker 추가, pytest 40개.
 - **PHASE 2** — 대시보드·회의 목록·생성·상세(회의록 보기/편집, 전사문, 이메일 미리보기)·이력·설정 화면, 반응형 레이아웃과 다크/라이트 모드, Backend API와 같은 형태의 Mock 데이터 계층(localStorage), 업로드 사전 검증, vitest 단위 테스트 26개. `@types/node`를 실행 환경(Node 22)에 맞춰 v22로 변경.

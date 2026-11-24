@@ -188,6 +188,7 @@ class ActionItemWithMeeting(ActionItemOut):
 
 
 class DocumentOut(ORM):
+    id: str
     meeting_id: str
     filename: str
     size_bytes: int
@@ -198,7 +199,9 @@ class EmailHistoryOut(ORM):
     id: str
     meeting_id: str
     to: list[str]
+    cc: list[str] = Field(default_factory=list)
     subject: str
+    attachment: str | None = None
     status: Literal["SENT", "FAILED"]
     error: str | None
     sent_at: datetime

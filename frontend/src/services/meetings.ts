@@ -6,7 +6,10 @@ import type {
   ActionStatus,
   DashboardSummary,
   DocumentInfo,
+  EmailDraft,
   EmailHistoryItem,
+  EmailPreview,
+  EmailRequest,
   Job,
   Meeting,
   MeetingCreateInput,
@@ -99,6 +102,37 @@ export const listDocuments = (meetingId: string) => request<DocumentInfo[]>(`/ap
 
 export const listEmailHistory = (meetingId?: string) =>
   request<EmailHistoryItem[]>(meetingId ? `/api/meetings/${enc(meetingId)}/emails` : "/api/emails");
+
+export const exportDocx = (meetingId: string) => request<DocumentInfo>(`/api/meetings/${enc(meetingId)}/export`, { method: "POST" });
+
+export const documentDownloadUrl = (docId: string) => `/api/documents/${enc(docId)}/download`;
+
+export async function deleteDocument(docId: string): Promise<void> {
+  await request(`/api/documents/${enc(docId)}`, { method: "DELETE" });
+}
+
+export const getEmailDraft = (meetingId: string) => request<EmailDraft>(`/api/meetings/${enc(meetingId)}/email/draft`);
+
+/** Server-side preview. Sends nothing and writes nothing. */
+export const previewEmail = (meetingId: string, req: EmailRequest) =>
+  request<EmailPreview>(`/api/meetings/${enc(meetingId)}/email/preview`, { method: "POST", json: req });
+
+/** Sends exactly the previewed message. Only called from the user's confirmed 발송 action. */
+export const sendEmail = (meetingId: string, preview: EmailPreview) =>
+  request<EmailHistoryItem>(`/api/meetings/${enc(meetingId)}/email/send`, {
+    method: "POST",
+    json: {
+      to: preview.to,
+      cc: preview.cc,
+      subject: preview.subject,
+      body: preview.body,
+      attach_docx: preview.attachment_name !== null,
+      content_hash: preview.content_hash,
+      confirm: true,
+    },
+  });
+
+export const testSmtpConnection = () => request<{ status: string; message: string }>("/api/email/test-connection", { method: "POST" });
 
 export async function deleteMeeting(meetingId: string): Promise<void> {
   await request(`/api/meetings/${enc(meetingId)}`, { method: "DELETE" });

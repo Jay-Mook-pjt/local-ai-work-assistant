@@ -205,7 +205,7 @@ function MeetingDetail() {
 
         {tab === "documents" &&
           (minutes ? (
-            <EmailPanel meeting={meeting} minutes={minutes} documents={documents} history={emails} />
+            <EmailPanel meeting={meeting} minutes={minutes} documents={documents} history={emails} onChanged={reload} />
           ) : (
             <Card>
               <EmptyState icon="file" title="회의록이 생성된 뒤 문서와 이메일을 만들 수 있습니다." />

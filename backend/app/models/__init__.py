@@ -166,6 +166,8 @@ class EmailHistory(Base):
     to: Mapped[list[str]] = mapped_column(JSON, default=list)
     cc: Mapped[list[str]] = mapped_column(JSON, default=list)
     subject: Mapped[str] = mapped_column(String(500))
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attachment: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(10))  # SENT | FAILED
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)

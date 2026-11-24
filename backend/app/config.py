@@ -54,7 +54,13 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     smtp_username: str = ""
     smtp_password: str = Field(default="", repr=False)
+    # Alternative to SMTP_PASSWORD: read it from the macOS Keychain
+    # (security add-generic-password -s <service> -a <SMTP_USERNAME> -w).
+    smtp_keychain_service: str = ""
     smtp_from: str = ""
+    smtp_from_name: str = "AI 회의록 비서"
+    smtp_timeout_seconds: int = 30
+    email_max_recipients: int = 50
 
     @field_validator("storage_dir", "log_dir")
     @classmethod

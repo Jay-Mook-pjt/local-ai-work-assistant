@@ -5,7 +5,7 @@ import { Alert, Button, Card, Loading, PageHeader, cx } from "@/components/commo
 import { SystemStatus } from "@/components/common/SystemStatus";
 import { applyTheme, useThemePref, type ThemePref } from "@/components/layout/ThemeToggle";
 import { useAsync } from "@/hooks/useAsync";
-import { getSettings, updateSettings } from "@/services/meetings";
+import { getSettings, testSmtpConnection, updateSettings } from "@/services/meetings";
 
 function ModelCard() {
   const { data, error, loading, setData } = useAsync(getSettings, []);
@@ -66,8 +66,35 @@ function ModelCard() {
         <dt className="muted">업로드 한도</dt>
         <dd>{data.max_upload_mb}MB</dd>
         <dt className="muted">SMTP</dt>
-        <dd>{data.smtp_configured ? "설정됨" : "미설정 (PHASE 5)"}</dd>
+        <dd>{data.smtp_configured ? "설정됨" : "미설정"}</dd>
       </dl>
+    </div>
+  );
+}
+
+function SmtpCard() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const run = async () => {
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult({ ok: true, message: (await testSmtpConnection()).message });
+    } catch (e) {
+      setResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-3 text-sm">
+      <p className="muted">
+        SMTP 계정은 프로젝트 루트의 <code className="font-mono">.env</code>(또는 macOS 키체인)에서 관리하며 화면에 표시하지 않습니다. 연결 테스트는 로그인만 하고 메일은 보내지 않습니다.
+      </p>
+      <Button variant="secondary" icon="mail" onClick={run} loading={busy}>
+        SMTP 연결 테스트
+      </Button>
+      {result && <Alert tone={result.ok ? "success" : "error"} title={result.message} />}
     </div>
   );
 }
@@ -110,11 +137,15 @@ export default function SettingsPage() {
           </div>
         </Card>
 
+        <Card title="이메일 (SMTP)">
+          <SmtpCard />
+        </Card>
+
         <Card title="보안 · 네트워크">
           <ul className="muted list-disc space-y-1.5 pl-5 text-sm">
             <li>외부 AI API를 사용하지 않으며, 음성과 텍스트는 이 Mac 안에서만 처리합니다.</li>
             <li>Ollama와 Backend는 127.0.0.1에서만 접속됩니다. 같은 LAN에서는 이 웹 화면(3000번 포트)만 접속할 수 있습니다.</li>
-            <li>이메일은 미리보기 후 발송 버튼을 직접 눌렀을 때만 전송됩니다. SMTP 계정은 .env에서 관리합니다 (PHASE 5).</li>
+            <li>이메일은 미리보기 후 발송 버튼을 누르고 한 번 더 확인했을 때만 전송됩니다. 미리보기 이후 내용이 바뀌면 발송되지 않습니다.</li>
           </ul>
         </Card>
       </div>

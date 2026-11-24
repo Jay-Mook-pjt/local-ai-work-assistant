@@ -112,6 +112,7 @@ export interface MeetingMinutes {
 }
 
 export interface DocumentInfo {
+  id: string;
   meeting_id: string;
   filename: string;
   size_bytes: number;
@@ -119,6 +120,14 @@ export interface DocumentInfo {
 }
 
 export interface EmailDraft {
+  subject: string;
+  body: string;
+  smtp_ready: boolean;
+  smtp_problem: string | null;
+  sender: string | null;
+}
+
+export interface EmailRequest {
   to: string[];
   cc: string[];
   subject: string;
@@ -126,11 +135,26 @@ export interface EmailDraft {
   attach_docx: boolean;
 }
 
+/** Exactly what the server would send; `content_hash` must accompany the send request. */
+export interface EmailPreview {
+  to: string[];
+  cc: string[];
+  sender: string | null;
+  subject: string;
+  body: string;
+  attachment_name: string | null;
+  content_hash: string;
+  smtp_ready: boolean;
+  smtp_problem: string | null;
+}
+
 export interface EmailHistoryItem {
   id: string;
   meeting_id: string;
   to: string[];
+  cc: string[];
   subject: string;
+  attachment: string | null;
   status: "SENT" | "FAILED";
   error: string | null;
   sent_at: string;
