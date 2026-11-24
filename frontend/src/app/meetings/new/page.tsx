@@ -2,12 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
-import { Alert, Button, Card, Field, LinkButton, Loading, PageHeader } from "@/components/common/ui";
+import { Alert, Button, Card, Field, LinkButton, Loading, PageHeader, ProgressBar } from "@/components/common/ui";
 import { AudioDropzone } from "@/components/meeting/AudioDropzone";
 import { ChipInput, RowListInput } from "@/components/meeting/ListInput";
 import { readAudioDuration } from "@/lib/audioValidation";
 import { todayIso } from "@/lib/format";
-import { createMeeting, USING_MOCK } from "@/services/meetings";
+import { createMeeting, type CreateStep } from "@/services/meetings";
 
 const INSTRUCTION_PRESETS = [
   "담당자별 업무와 후속 조치를 중심으로 정리해 줘.",
@@ -32,6 +32,7 @@ function NewMeetingForm() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [step, setStep] = useState<{ step: CreateStep; ratio?: number } | null>(null);
 
   const onFile = (f: File, err: string | null) => {
     setFile(f);
@@ -73,12 +74,14 @@ function NewMeetingForm() {
           agenda: agenda.map((a) => a.trim()).filter(Boolean),
           instructions: instructions.trim(),
         },
-        { filename: file.name.normalize("NFC"), size_bytes: file.size, duration_seconds: duration, mime_type: file.type || "application/octet-stream" },
+        file,
+        (st, ratio) => setStep({ step: st, ratio }),
       );
       router.push(`/meetings/${meeting.id}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
+      setStep(null);
     }
   };
 
@@ -161,11 +164,15 @@ function NewMeetingForm() {
               <li>Ollama 구간별 분석 및 통합</li>
               <li>회의록 초안 생성 → 검토·수정</li>
             </ol>
-            {USING_MOCK && (
-              <div className="mb-4">
-                <Alert tone="warning" title="Mock 모드">
-                  파일은 업로드되지 않고, 처리 과정은 약 20초 동안 시뮬레이션됩니다.
-                </Alert>
+            {step && (
+              <div className="mb-4 space-y-1.5">
+                <ProgressBar value={step.step === "uploading" ? Math.round((step.ratio ?? 0) * 100) : step.step === "queueing" ? 100 : 0} />
+                <p className="muted text-xs">
+                  {step.step === "creating" && "회의 등록 중…"}
+                  {step.step === "uploading" && (step.ratio ?? 0) < 1 && `음성 파일 업로드 중… ${Math.round((step.ratio ?? 0) * 100)}%`}
+                  {step.step === "uploading" && (step.ratio ?? 0) >= 1 && "파일 검증 중…"}
+                  {step.step === "queueing" && "AI 처리 대기열에 등록 중…"}
+                </p>
               </div>
             )}
             {submitError && (

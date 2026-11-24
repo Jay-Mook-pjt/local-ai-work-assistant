@@ -19,6 +19,15 @@ else
   echo "backend 시작: http://$BACKEND_HOST:$BACKEND_PORT (pid $!)"
 fi
 
+if is_running "$RUN_DIR/worker.pid"; then
+  echo "worker 이미 실행 중 (pid $(cat "$RUN_DIR/worker.pid"))"
+else
+  cd "$ROOT/backend"
+  nohup .venv/bin/python -m worker.main >>"$LOG_DIR/worker.out.log" 2>&1 &
+  echo $! >"$RUN_DIR/worker.pid"
+  echo "worker 시작 (pid $!)"
+fi
+
 if is_running "$RUN_DIR/frontend.pid"; then
   echo "frontend 이미 실행 중 (pid $(cat "$RUN_DIR/frontend.pid"))"
 else

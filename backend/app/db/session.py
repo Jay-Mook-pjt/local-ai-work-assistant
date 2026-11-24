@@ -1,5 +1,6 @@
 """SQLAlchemy engine/session. Tables are added in PHASE 3."""
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -16,7 +17,12 @@ class Base(DeclarativeBase):
 def _make_engine(url: str):
     if url.startswith("sqlite:///"):
         Path(url[len("sqlite:///"):]).parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(url, connect_args={"check_same_thread": False} if url.startswith("sqlite") else {})
+    engine = create_engine(
+        url,
+        connect_args={"check_same_thread": False} if url.startswith("sqlite") else {},
+        # Keep Korean readable in JSON columns so LIKE search on them works.
+        json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
+    )
 
     if url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
@@ -43,4 +49,6 @@ def get_db() -> Iterator[Session]:
 
 
 def init_db() -> None:
+    import app.models  # noqa: F401, PLC0415  (registers tables on Base.metadata)
+
     Base.metadata.create_all(bind=engine)

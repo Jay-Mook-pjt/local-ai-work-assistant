@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     llm_num_ctx: int = 8192
     llm_timeout_seconds: int = 600
 
+    ffmpeg_bin: str = "ffmpeg"
+    ffprobe_bin: str = "ffprobe"
+    worker_poll_seconds: float = Field(default=2.0, gt=0)
+
     stt_model: str = "mlx-community/whisper-large-v3-turbo"
     stt_language: str = "ko"
 

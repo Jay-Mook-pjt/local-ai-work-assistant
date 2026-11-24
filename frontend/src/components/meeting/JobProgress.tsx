@@ -9,10 +9,10 @@ const STEPS: JobStatus[] = ["UPLOADED", "PREPROCESSING", "TRANSCRIBING", "ANALYZ
 
 export function JobProgress({ job, onRetry, retrying }: { job: Job; onRetry: () => void; retrying: boolean }) {
   const failed = job.status === "FAILED";
-  const current = failed ? -1 : STEPS.indexOf(job.status);
+  const current = failed ? -1 : job.status === "PENDING" ? 0 : STEPS.indexOf(job.status);
 
   return (
-    <Card title={failed ? "처리 실패" : "AI 처리 진행 중"} action={<span className="muted text-xs">{formatDateTime(job.updated_at)}</span>}>
+    <Card title={failed ? "처리 실패" : job.status === "PENDING" ? "처리 대기 중" : "AI 처리 진행 중"} action={<span className="muted text-xs">{formatDateTime(job.updated_at)}</span>}>
       <div className="space-y-4">
         <div className="flex items-center gap-3">
           <ProgressBar value={job.progress} failed={failed} />

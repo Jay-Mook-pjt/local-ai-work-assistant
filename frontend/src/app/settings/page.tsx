@@ -1,13 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { Alert, Button, Card, ConfirmDialog, Loading, PageHeader, cx } from "@/components/common/ui";
+import { Alert, Card, Loading, PageHeader, cx } from "@/components/common/ui";
 import { SystemStatus } from "@/components/common/SystemStatus";
 import { applyTheme, useThemePref, type ThemePref } from "@/components/layout/ThemeToggle";
 import { useAsync } from "@/hooks/useAsync";
 import { MAX_UPLOAD_MB } from "@/lib/audioValidation";
 import { api } from "@/services/api";
-import { resetMockData, USING_MOCK } from "@/services/meetings";
 
 function ModelCard() {
   const { data, error, loading } = useAsync(api.health, []);
@@ -57,9 +55,6 @@ const THEMES: { id: ThemePref; label: string }[] = [
 
 export default function SettingsPage() {
   const theme = useThemePref();
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [resetting, setResetting] = useState(false);
-  const [resetDone, setResetDone] = useState(false);
 
   return (
     <>
@@ -97,39 +92,7 @@ export default function SettingsPage() {
             <li>이메일은 미리보기 후 발송 버튼을 직접 눌렀을 때만 전송됩니다. SMTP 계정은 .env에서 관리합니다 (PHASE 5).</li>
           </ul>
         </Card>
-
-        {USING_MOCK && (
-          <Card title="Mock 데이터">
-            <p className="muted mb-4 text-sm">PHASE 2 화면 확인용 예시 데이터는 이 브라우저에만 저장됩니다. 처음 상태로 되돌릴 수 있습니다.</p>
-            {resetDone && (
-              <div className="mb-4">
-                <Alert tone="success" title="예시 데이터를 초기화했습니다." />
-              </div>
-            )}
-            <Button variant="secondary" icon="refresh" onClick={() => setConfirmReset(true)}>
-              예시 데이터 초기화
-            </Button>
-          </Card>
-        )}
       </div>
-
-      <ConfirmDialog
-        open={confirmReset}
-        title="예시 데이터를 초기화할까요?"
-        confirmLabel="초기화"
-        tone="danger"
-        loading={resetting}
-        onCancel={() => setConfirmReset(false)}
-        onConfirm={async () => {
-          setResetting(true);
-          await resetMockData();
-          setResetting(false);
-          setConfirmReset(false);
-          setResetDone(true);
-        }}
-      >
-        이 브라우저에서 추가·수정한 Mock 회의 데이터가 모두 사라지고 처음 예시 데이터로 돌아갑니다. 실제 파일이나 DB에는 영향이 없습니다.
-      </ConfirmDialog>
     </>
   );
 }

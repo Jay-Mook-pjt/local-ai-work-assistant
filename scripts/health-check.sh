@@ -13,6 +13,8 @@ check "Backend  ($BACKEND_HOST:$BACKEND_PORT)" "http://$BACKEND_HOST:$BACKEND_PO
 check "Frontend (:$FRONTEND_PORT)" "http://127.0.0.1:$FRONTEND_PORT/"
 check "Frontend → Backend proxy" "http://127.0.0.1:$FRONTEND_PORT/api/health"
 
+if is_running "$RUN_DIR/worker.pid"; then echo "✅ Worker   (pid $(cat "$RUN_DIR/worker.pid"))"; else echo "❌ Worker   실행 중 아님"; fail=1; fi
+
 if health="$(curl -fsS -m 10 "http://$BACKEND_HOST:$BACKEND_PORT/api/health" 2>/dev/null)"; then
   echo "$health" | /usr/bin/python3 -c '
 import json, sys

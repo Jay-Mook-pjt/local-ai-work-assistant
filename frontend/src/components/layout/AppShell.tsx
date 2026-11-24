@@ -3,11 +3,10 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "@/components/common/Icon";
-import { Badge, cx } from "@/components/common/ui";
+import { cx } from "@/components/common/ui";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { api } from "@/services/api";
-import { USING_MOCK } from "@/services/meetings";
 
 function SystemDot() {
   const [state, setState] = useState<"checking" | "ok" | "degraded" | "down">("checking");
@@ -67,11 +66,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Icon name="menu" className="h-5 w-5" />
           </button>
           <div className="flex-1" />
-          {USING_MOCK && (
-            <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" >
-              <span title="PHASE 2: 회의 데이터는 브라우저에 저장되는 예시 데이터입니다. PHASE 3에서 실제 API로 교체됩니다.">Mock 데이터</span>
-            </Badge>
-          )}
           <SystemDot />
           <ThemeToggle />
         </header>

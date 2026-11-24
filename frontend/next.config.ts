@@ -1,8 +1,10 @@
 import type { NextConfig } from "next";
 
+import { BACKEND_URL } from "./src/lib/backend";
+
 // The backend binds to localhost only. The browser (possibly on another LAN
 // device) talks to this Next.js server, which forwards /api/* to the backend.
-const BACKEND_URL = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
+// Large audio uploads bypass this rewrite: see src/app/api/meetings/[id]/audio/route.ts.
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
@@ -16,7 +18,9 @@ const nextConfig: NextConfig = {
     },
   },
   async rewrites() {
-    return [{ source: "/api/:path*", destination: `${BACKEND_URL}/api/:path*` }];
+    // `fallback` = applied only after every app route (incl. dynamic Route Handlers
+    // such as the streaming audio upload) failed to match.
+    return { beforeFiles: [], afterFiles: [], fallback: [{ source: "/api/:path*", destination: `${BACKEND_URL}/api/:path*` }] };
   },
 };
 
