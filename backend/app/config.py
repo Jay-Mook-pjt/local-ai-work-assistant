@@ -1,5 +1,6 @@
 """Application settings loaded from environment variables / project-root .env."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -12,7 +13,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=PROJECT_ROOT / ".env",
+        # APP_ENV_FILE selects the profile: .env (development) or e.g. .env.offline (closed network)
+        env_file=PROJECT_ROOT / os.environ.get("APP_ENV_FILE", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -24,6 +26,8 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///database/meeting.db"
     storage_dir: Path = Path("storage")
+    # Local model folders (see app/services/model_store.py); preferred over the HF cache.
+    models_dir: Path = Path("models")
     log_dir: Path = Path("logs")
     log_level: str = "INFO"
 
@@ -36,6 +40,10 @@ class Settings(BaseSettings):
     llm_num_ctx: int = 16384
     llm_timeout_seconds: int = 900
     llm_keep_alive: str = "2m"
+    # Never send meeting text to Ollama cloud models (":cloud"/"-cloud", remote_host).
+    llm_allow_cloud: bool = False
+    # Free the LLM's memory when a job finishes (next job starts with STT, not a resident LLM).
+    llm_unload_after_job: bool = True
     # Transcript characters per LLM analysis chunk (Korean ~1.5 chars/token).
     llm_chunk_chars: int = Field(default=6000, ge=1000)
 
@@ -48,6 +56,14 @@ class Settings(BaseSettings):
     # Long audio is transcribed in windows of this length, overlapping by stt_overlap_seconds.
     stt_chunk_seconds: int = Field(default=600, ge=60)
     stt_overlap_seconds: int = Field(default=10, ge=0, le=60)
+
+    # Speaker diarization (pyannote.audio). The model is downloaded once with
+    # `python -m app.services.diarization_service download` and then used offline.
+    diarization_enabled: bool = False
+    diarization_model: str = "pyannote/speaker-diarization-community-1"
+    diarization_device: str = "auto"  # auto | mps | cpu
+    hf_keychain_service: str = "local-ai-work-assistant-hf"
+    hf_keychain_account: str = "huggingface"
 
     smtp_host: str = ""
     smtp_port: int = 587
@@ -62,7 +78,7 @@ class Settings(BaseSettings):
     smtp_timeout_seconds: int = 30
     email_max_recipients: int = 50
 
-    @field_validator("storage_dir", "log_dir")
+    @field_validator("storage_dir", "log_dir", "models_dir")
     @classmethod
     def _resolve_dir(cls, v: Path) -> Path:
         return v if v.is_absolute() else (PROJECT_ROOT / v).resolve()

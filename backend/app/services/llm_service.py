@@ -55,6 +55,19 @@ def _record(entry: dict[str, Any]) -> None:
     _calls_logger().info(json.dumps(entry, ensure_ascii=False))
 
 
+CLOUD_SUFFIX = ("-cloud", ":cloud")
+
+
+def is_cloud_name(model: str) -> bool:
+    name = model.strip().lower()
+    return name.endswith(CLOUD_SUFFIX) or ":cloud" in name or name.split(":")[-1].endswith("-cloud")
+
+
+def _guard_local(model: str) -> None:
+    if not get_settings().llm_allow_cloud and is_cloud_name(model):
+        raise LLMError(f"클라우드 모델({model})은 사용할 수 없습니다. 회의 내용은 이 Mac의 로컬 모델로만 처리합니다.")
+
+
 def chat_json(
     *,
     system: str,
@@ -68,6 +81,7 @@ def chat_json(
     """Calls Ollama /api/chat constrained to `schema`'s JSON schema and validates the result."""
     s = get_settings()
     model = model or s.llm_model
+    _guard_local(model)
     body = {
         "model": model,
         "stream": False,
@@ -123,12 +137,30 @@ def chat_json(
 
 
 def installed_models(transport: httpx.BaseTransport | None = None) -> list[str]:
+    """Locally runnable models only: cloud stubs (remote_host / '-cloud') are excluded."""
     s = get_settings()
     try:
         with httpx.Client(base_url=s.ollama_base_url, timeout=5, transport=transport) as client:
-            return [m["name"] for m in client.get("/api/tags").raise_for_status().json().get("models", [])]
+            models = client.get("/api/tags").raise_for_status().json().get("models", [])
     except httpx.HTTPError as exc:
         raise LLMError("Ollama에 연결할 수 없습니다.") from exc
+    return [m["name"] for m in models if s.llm_allow_cloud or (not m.get("remote_host") and not is_cloud_name(m["name"]))]
+
+
+def loaded_models() -> list[str]:
+    try:
+        with httpx.Client(base_url=get_settings().ollama_base_url, timeout=5) as client:
+            return [m["name"] for m in client.get("/api/ps").json().get("models", [])]
+    except (httpx.HTTPError, ValueError):
+        return []
+
+
+def unload_all() -> list[str]:
+    """Frees every model Ollama currently holds in memory. Returns their names."""
+    names = loaded_models()
+    for name in names:
+        unload(name)
+    return names
 
 
 def unload(model: str) -> None:

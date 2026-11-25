@@ -33,7 +33,15 @@ class AnalysisResult:
 
 
 def format_line(seg: Segment) -> str:
-    return f"[{review_agent.fmt_ts(seg.start)}] {seg.text}"
+    who = f"{seg.speaker}: " if seg.speaker else ""
+    return f"[{review_agent.fmt_ts(seg.start)}] {who}{seg.text}"
+
+
+def apply_speaker_names(segments: list[Segment], names: dict[str, str] | None) -> list[Segment]:
+    """'화자 2' → '박정우 책임' where the user named the speaker."""
+    if not names:
+        return segments
+    return [Segment(s.start, s.end, s.text, names.get(s.speaker or "", s.speaker)) for s in segments]
 
 
 def chunk_transcript(segments: list[Segment], max_chars: int) -> list[str]:
@@ -78,6 +86,7 @@ def analyze(
         raise llm_service.LLMError("전사문이 비어 있어 회의록을 만들 수 없습니다. 음성에 말소리가 있는지 확인하세요.")
     s = get_settings()
     model = model or s.llm_model
+    segments = apply_speaker_names(segments, meeting.speaker_names)
     system = prompt_service.system_prompt(glossary)
     fields = _meeting_fields(meeting)
     chunks = chunk_transcript(segments, s.llm_chunk_chars)

@@ -1,5 +1,7 @@
 """FastAPI entrypoint. Run: uvicorn app.main:app --host 127.0.0.1 --port 8000"""
 
+import app.offline  # noqa: F401, I001 - must precede any model-library import
+
 import logging
 from contextlib import asynccontextmanager
 

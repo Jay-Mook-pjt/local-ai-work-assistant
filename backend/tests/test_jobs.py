@@ -172,3 +172,35 @@ def test_interrupted_jobs_are_failed_on_worker_start(client, db, media_dir):
 def test_job_not_found(client):
     assert client.get("/api/jobs/" + "a" * 32).status_code == 404
     assert client.get("/api/jobs/not-an-id").status_code == 422
+
+
+def test_job_records_stage_metrics(client, media_dir, engines):
+    m = make_meeting(client)
+    upload(client, m["id"], media_dir / "tone.wav", mime="audio/wav")
+    job_id = client.post(f"/api/meetings/{m['id']}/analyze").json()["id"]
+    run_once("w")
+    metrics = client.get(f"/api/jobs/{job_id}").json()["metrics"]
+    stages = [r["stage"] for r in metrics]
+    assert stages[0] == "start" and stages[-1] == "finished"
+    assert stages.index("stt") < stages.index("stt_released") < stages.index("llm") < stages.index("save_minutes")
+    for r in metrics:
+        assert r["seconds"] >= 0 and r["worker_rss_mb"] > 0
+        assert set(r) >= {"mlx_active_mb", "torch_mps_mb", "ollama_loaded_mb", "system_free_pct"}
+
+
+def test_job_completes_when_resource_probes_fail(client, media_dir, engines, monkeypatch):
+    """A sandbox can forbid probes (e.g. exec of setuid `ps`); metrics must never break a job."""
+    from app.services import resource_monitor
+
+    def blocked():
+        raise PermissionError("Operation not permitted")
+
+    for name in ("_rss_mb", "_system_free_pct", "_ollama_mb"):
+        monkeypatch.setattr(resource_monitor, name, blocked)
+    m = make_meeting(client)
+    upload(client, m["id"], media_dir / "tone.wav", mime="audio/wav")
+    job_id = client.post(f"/api/meetings/{m['id']}/analyze").json()["id"]
+    run_once("w")
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "COMPLETED"
+    assert job["metrics"][0]["stage"] == "start" and job["metrics"][0]["worker_rss_mb"] is None

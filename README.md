@@ -156,6 +156,27 @@ API 문서: <http://127.0.0.1:8000/docs> (이 Mac에서만 접속 가능).
 
 프롬프트는 `app/prompts/<이름>_v<N>.md` 파일로 관리하며, 사용 버전은 `app/services/prompt_service.py`의 `PROMPT_VERSIONS`에서 정합니다(현재 system v3, chunk·merge·single v2).
 
+### 화자 분리 (pyannote.audio)
+- 모델: `pyannote/speaker-diarization-community-1` (pyannote.audio 4.1.1, Apple GPU/MPS). 12분 33초 녹음 기준 화자 분리 약 24초, 모델 65MB.
+- 처리: 음성 인식(단어 시각 모드 → 짧은 문장) → 화자 분리 → 문장마다 시간이 가장 많이 겹치는 화자 배정 → `화자 1`, `화자 2`… (처음 말한 순서). 단어 단위로 더 쪼개는 방식은 비교 결과 화자 분리 잡음을 따라가 더 나빠서 쓰지 않습니다.
+- **화자 이름 지정**: 회의 상세 → 전사문 탭 → "화자 이름 지정". 저장하면 현재 회의록의 `화자 N` 표기(담당자·발언자·요약)가 이름으로 바뀌고(조사 이/가·은/는 등 자동 보정), 이후 다시 분석할 때 AI에 `[시:분:초] 이름: 발언` 형태로 전달됩니다.
+- AI는 "제가 하겠습니다"처럼 본인이 맡겠다고 한 발언자를 담당자로 적을 수 있고, 근거 검증은 그 발언의 화자와 담당자가 일치하는지 확인합니다.
+- 화자 분리에 실패하면 회의 처리는 계속되고(화자 표시 없음) 검토 항목에 이유가 남습니다.
+- 한계: 맞장구·겹친 말, 비슷한 목소리, 화자 수 추정 오류. 화자 번호와 실제 인물 연결은 사용자가 지정합니다.
+
+**최초 설정 (1회)**
+1. <https://hf.co/pyannote/speaker-diarization-community-1> 사용 조건 동의, <https://huggingface.co/settings/tokens>에서 Read 토큰 발급
+2. 토큰을 키체인에 저장: `security add-generic-password -s local-ai-work-assistant-hf -a huggingface -w`
+3. 모델 받기: `cd backend && .venv/bin/python -m app.services.diarization_service download`
+4. `.env`에 `DIARIZATION_ENABLED=true` 후 재시작
+
+### 오프라인 동작 (외부 전송 차단)
+- API·Worker는 시작 시 가장 먼저 `app/offline.py`를 실행해 `HF_HUB_OFFLINE=1`, `HF_HUB_DISABLE_TELEMETRY=1`, `PYANNOTE_METRICS_ENABLED=false`를 설정합니다(실행 스크립트에도 동일하게 지정).
+  - pyannote.audio 4.x는 사용 통계(모델명·음성 길이·화자 수)를 `otel.pyannote.ai`로 보내는 기능이 **기본으로 켜져 있어** 이를 끕니다.
+  - MLX Whisper는 실행할 때마다 huggingface.co에 모델 최신 버전을 조회하고 있었습니다(PHASE 4~6). 오프라인 모드로 차단했습니다.
+- 확인: 처리 중 Worker·Backend 프로세스의 네트워크 연결을 0.2초 간격으로 감시한 결과 외부 연결 0건, Worker 로그의 외부 HTTP 요청 0건.
+- 모델은 `models/` 폴더에서 로딩합니다. 인터넷이 필요한 작업은 준비 단계의 `model_store fetch`뿐입니다. 자세한 내용은 아래 [폐쇄망 설치 및 운영](#폐쇄망-설치-및-운영)을 참고하세요.
+
 ### 프로젝트 용어집
 설정 → **프로젝트 용어집**에서 업무 용어와 뜻(필요하면 음성 인식이 잘못 적는 표기)을 등록합니다. 모델을 재학습하는 방식이 아니라, 새로 처리하는 모든 회의에 다음처럼 참고 자료로 전달됩니다.
 - **음성 인식**: 용어를 Whisper 초기 프롬프트(표기 힌트)에 포함 — 참석자 이름·용어·안건 순, 300자 이내.
@@ -167,7 +188,7 @@ API 문서: <http://127.0.0.1:8000/docs> (이 Mac에서만 접속 가능).
 회의 상세 → **다시 분석** → 모델 선택. 같은 음성이면 전사문을 재사용해 LLM 단계만 실행합니다. 결과 회의록에는 사용한 모델명이 표시됩니다. 직접 수정한 회의록은 덮어쓰기 확인 후에만 바뀝니다.
 
 ### 알려진 한계
-- 화자 분리(누가 말했는지)는 지원하지 않습니다. 담당자는 발언 내용("박정우 책임님이…")으로만 판단합니다.
+- 화자 분리 결과는 `화자 N` 번호이며, 실제 인물과의 연결은 사용자가 "화자 이름 지정"으로 합니다. 이름을 지정하기 전에는 담당자를 발언 내용("박정우 책임님이…")으로 판단합니다.
 - 논의사항 요약 문장 자체는 근거 인용이 없어 자동 검증이 숫자 확인에 한정됩니다. 최종 회의록은 사용자가 검토·수정하는 것을 전제로 합니다.
 - 실측 처리 시간(qwen3:14b): 2분 회의 약 35~40초(한 번 호출), 구간 분석 경로는 구간당 20~35초 + 통합 약 40초.
 
@@ -253,6 +274,60 @@ cd backend
 
 최근 결과: short 16/17, long 26/27(실패는 모두 STT 이름 오인식이며 회의록에서는 보정됨), recovery 9/9, persistence 4/4. 36분 회의 처리 약 4.7분. 자세한 내용과 남은 한계는 [PHASE6-summary.md](docs/test-reports/PHASE6-summary.md)를 참고하세요.
 
+## 폐쇄망 설치 및 운영
+
+외부 인터넷 없이 동작합니다. 필요한 네트워크는 LAN 사용자 접속(`:3000`)과 내부 메일 릴레이(SMTP)뿐입니다. 점검 결과, 반입 목록, 메모리 측정값, 남은 한계는 [docs/OFFLINE.md](docs/OFFLINE.md)에 정리했습니다.
+
+### 1) 준비 — 개발 환경(인터넷 연결)에서 1회
+```bash
+# STT·화자 분리 모델 → models/ (화자 분리는 HF 토큰이 키체인에 있어야 함. 토큰은 이 단계에서만 사용)
+cd backend
+.venv/bin/python -m app.services.model_store fetch
+.venv/bin/python -m app.services.model_store verify --load
+
+# Python 패키지: 버전 고정 목록 + wheel 묶음
+uv pip freeze -p .venv/bin/python --exclude-editable > requirements.lock.txt
+uvx --from pip pip download -r requirements.lock.txt -d ../wheelhouse --only-binary=:all:
+
+# LLM 모델: manifest + blob만 복사, sha256 검사
+cd .. && scripts/offline/ollama-models.sh export /Volumes/<반입매체>/ollama-backup qwen3:14b
+
+# Frontend
+cd frontend && npm ci && npm run build
+```
+반입할 것: 프로젝트 폴더(`models/`, `wheelhouse/`, `frontend/node_modules`, `frontend/.next` 포함), `ollama-backup/`, uv의 Python 3.12 런타임, Homebrew 도구(`ollama`, `ffmpeg`, `node@22`, `uv`). Homebrew 도구의 오프라인 설치는 아직 검증하지 않았습니다(docs/OFFLINE.md 6-3).
+
+### 2) 설치 — 폐쇄망 장비
+```bash
+cd backend
+UV_OFFLINE=1 uv venv -p 3.12 .venv
+uv pip install -p .venv/bin/python --offline --no-index --find-links ../wheelhouse -r requirements.lock.txt
+.venv/bin/python -m app.services.model_store verify --load        # 네트워크·토큰 없이 두 모델 로딩 확인
+cd ..
+scripts/offline/ollama-models.sh import /Volumes/<반입매체>/ollama-backup   # sha256 검사 후 ~/.ollama/models로 복원
+scripts/ollama-offline.sh apply                                    # Ollama에 OLLAMA_NO_CLOUD=1, 127.0.0.1 바인딩
+cp .env.offline.example .env.offline                               # SMTP_HOST 등 내부 값 입력
+```
+
+### 3) 운영
+```bash
+APP_ENV_FILE=.env.offline scripts/start.sh prod
+APP_ENV_FILE=.env.offline scripts/health-check.sh   # 실행 중인 프로세스의 HF_HUB_OFFLINE·PYANNOTE_METRICS_ENABLED·OLLAMA_NO_CLOUD까지 확인
+scripts/stop.sh
+```
+- 모델은 실행 중에 다운로드되지 않습니다. `models/` 폴더가 없으면 오류를 내고 멈춥니다(`HF_HUB_OFFLINE=1`).
+- 클라우드 모델(`*-cloud`)은 Ollama와 앱 양쪽에서 거부합니다.
+- `brew services restart ollama`를 실행하면 `OLLAMA_NO_CLOUD`가 빠집니다. `scripts/ollama-offline.sh status`로 확인하고, 빠졌으면 `apply`를 다시 실행하세요.
+- LLM 모델 백업 손상 여부 확인: `scripts/offline/ollama-models.sh verify <폴더>`
+
+### 4) 폐쇄망 검증 테스트
+```bash
+scripts/offline/run-offline-test.sh
+```
+- macOS 샌드박스로 외부 연결과 DNS를 차단하고 localhost만 허용합니다. 그 안에서 별도 DB로 업로드 → STT → 화자 분리 → 회의록 → DOCX → 내부 SMTP → SQLite까지 실행하고, 외부 연결이 없는지 감시합니다.
+- 테스트 중에는 정상 서비스를 멈췄다가 끝나면 다시 시작합니다.
+- 최근 결과: 14/14, 외부 연결 0건.
+
 ## 보안 원칙
 - 외부 AI API 미사용, 모든 음성·텍스트는 이 Mac에서만 처리
 - Ollama·Backend는 `127.0.0.1` 바인딩, Frontend만 LAN 노출, 포트포워딩 없음
@@ -272,9 +347,20 @@ cd backend
 | 4 | Ollama·MLX Whisper 연동 | ✅ 완료 |
 | 5 | DOCX·이메일 | ✅ 완료 (실제 발송은 SMTP 계정 입력 필요) |
 | 6 | 통합 테스트 | ✅ 완료 |
+| 6-1 | 로컬 AI 폐쇄망 검증 | ✅ 완료 (Homebrew 도구 오프라인 설치는 미검증) |
 | 7 | 로컬 운영(launchd, 백업) | ⏳ 예정 |
 
 ## 변경 이력
+- **PHASE 6-1 폐쇄망 검증**:
+  - 외부 연결 점검과 차단: MLX Whisper의 버전 조회, pyannote 사용 통계, Ollama 클라우드 모델
+  - 모델 로딩 경로 통합(`models/`, `model_store`), `.env.offline` 운영 프로필
+  - Ollama `OLLAMA_NO_CLOUD` 적용(`ollama-offline.sh`), 실행 중인 프로세스의 환경변수 점검
+  - 단계별 시간·메모리 기록(`jobs.metrics`), 작업 전후 LLM 해제
+  - 샌드박스 폐쇄망 통합 테스트: 14/14, 외부 연결 0건
+  - wheelhouse 오프라인 설치 검증, Ollama 모델 백업·복원 스크립트(sha256 검사)
+  - 수정: 측정 실패로 작업이 멈추던 문제, 테스트 후 정상 서비스가 테스트 DB를 바라보던 문제
+  - pytest 114개
+- **화자 분리** — pyannote.audio 4.1.1(community-1, MPS) 화자 분리, 화자 이름 지정 API·화면(회의록 표기 자동 갱신, 조사 보정), 발언자 정보를 AI 분석·근거 검증에 반영(시스템 프롬프트 v4), 처리 실패 시 계속 진행, 모델 라이브러리 오프라인 강제(pyannote 텔레메트리·Hugging Face 버전 조회 차단, 실측 외부 연결 0건), health에 화자 분리 상태, pytest 110개.
 - **PHASE 6** — 재실행 가능한 통합 테스트 하네스(TTS 합성·자동 채점·자원 측정·보고서), short/long/recovery/persistence 시나리오, 발견 문제 수정(자모 기반 이름 보정, 여러 명 담당자 검증, 미결/다음 회의 정리·중복 제거, 의견의 결정 등록 방지, 업무 배정 판정 회귀 수정, 녹음에 없는 '다음 회의' 표시, 문장 잘림), 프롬프트 system v3·chunk/single/merge v2, 프로젝트 용어집(STT·LLM 참고)과 "음성 인식부터 다시" 옵션, pytest 102개.
 - **PHASE 5** — DOCX 생성(8개 섹션, 고정 표 레이아웃, 미확인 강조)·다운로드(한글 파일명)·삭제, 이메일 초안·서버 미리보기·해시 기반 승인 발송·발송 이력, SMTP STARTTLS/SSL·키체인 비밀번호·연결 테스트, 화면의 문서·이메일 패널과 발송 확인 창, 설정 화면 SMTP 연결 테스트, 메일 초안 생성을 Backend로 이전, aiosmtpd 개발 의존성(requirements-dev.txt), pytest 89개.
 - **PHASE 4** — MLX Whisper 음성 인식(구간 분할·오버랩·환각 필터·초기 프롬프트), Ollama 구조화 출력 클라이언트(호출 로그·재시도·오류 메시지), Meeting Agent(구간 분석→통합), 근거 검증(타임스탬프 교정·담당자/기한/숫자 확인·업무 배정 분리·이름 보정), 검토 항목 화면 표시, 기본 모델 설정 API·화면, 다른 모델로 다시 분석(전사문 재사용·수정본 보호), DB 컬럼 자동 추가, 프롬프트 버전 관리, pytest 73개, 실제 한국어 회의 음성으로 3개 모델 비교.

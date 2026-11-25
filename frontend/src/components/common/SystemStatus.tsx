@@ -8,6 +8,7 @@ const LABELS: Record<string, string> = {
   database: "데이터베이스 (SQLite)",
   ollama: "LLM (Ollama)",
   stt: "STT (MLX Whisper)",
+  diarization: "화자 분리 (pyannote)",
 };
 
 export function SystemStatus() {

@@ -5,6 +5,7 @@ import { Icon } from "@/components/common/Icon";
 import { Button, EmptyState, cx } from "@/components/common/ui";
 import { formatTimestamp } from "@/lib/format";
 import type { Transcript } from "@/types/meeting";
+import { speakerColor, speakerName } from "@/components/meeting/speakers";
 
 function parseTs(ts: string): number | null {
   const m = /^(\d{1,2}):(\d{2}):(\d{2})$/.exec(ts.trim());
@@ -25,7 +26,7 @@ function highlight(text: string, q: string) {
   );
 }
 
-export function TranscriptView({ transcript, focusTs }: { transcript: Transcript | null; focusTs: string | null }) {
+export function TranscriptView({ transcript, focusTs, speakerNames }: { transcript: Transcript | null; focusTs: string | null; speakerNames?: Record<string, string> | null }) {
   const [q, setQ] = useState("");
   const [copied, setCopied] = useState(false);
   const refs = useRef<(HTMLLIElement | null)[]>([]);
@@ -49,7 +50,7 @@ export function TranscriptView({ transcript, focusTs }: { transcript: Transcript
   const visible = transcript.segments.map((s, i) => ({ s, i })).filter(({ s }) => !q || s.text.toLowerCase().includes(q.toLowerCase()));
 
   const copyAll = async () => {
-    const text = transcript.segments.map((s) => `[${formatTimestamp(s.start)}] ${s.text}`).join("\n");
+    const text = transcript.segments.map((s) => `[${formatTimestamp(s.start)}] ${s.speaker ? `${speakerName(s.speaker, speakerNames)}: ` : ""}${s.text}`).join("\n");
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
@@ -81,7 +82,7 @@ export function TranscriptView({ transcript, focusTs }: { transcript: Transcript
           >
             <span className="w-16 shrink-0 pt-0.5 font-mono text-xs text-slate-500">{formatTimestamp(s.start)}</span>
             <span>
-              {s.speaker && <span className="mr-1.5 font-medium">{s.speaker}:</span>}
+              {s.speaker && <span className={`mr-1.5 rounded px-1.5 py-0.5 text-xs font-medium ${speakerColor(s.speaker)}`}>{speakerName(s.speaker, speakerNames)}</span>}
               {highlight(s.text, q)}
             </span>
           </li>

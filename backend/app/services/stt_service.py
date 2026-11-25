@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from app.config import get_settings
+from app.services import model_store
 
 log = logging.getLogger(__name__)
 SAMPLE_RATE = 16000
@@ -39,6 +40,11 @@ class Segment:
     end: float
     text: str
     speaker: str | None = None
+    # Word timings (only while processing, for speaker splitting; not stored).
+    words: list[dict] | None = None
+
+    def stored(self) -> dict:
+        return {"start": self.start, "end": self.end, "text": self.text, "speaker": self.speaker}
 
 
 class STTError(Exception):
@@ -101,7 +107,12 @@ def clean_segments(raw: list[dict], offset: float) -> list[Segment]:
             continue
         if out and _norm(out[-1].text) == _norm(text):  # exact repeat of previous line
             continue
-        out.append(Segment(start=round(offset + float(r["start"]), 2), end=round(offset + float(r["end"]), 2), text=text))
+        words = [
+            {"word": w["word"], "start": round(offset + float(w["start"]), 2), "end": round(offset + float(w["end"]), 2)}
+            for w in (r.get("words") or [])
+            if w.get("word", "").strip()
+        ] or None
+        out.append(Segment(start=round(offset + float(r["start"]), 2), end=round(offset + float(r["end"]), 2), text=text, words=words))
     return out
 
 
@@ -123,6 +134,7 @@ def transcribe(
     initial_prompt: str | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     transcribe_fn: Callable[..., dict] | None = None,
+    word_timestamps: bool = False,
 ) -> list[Segment]:
     """Transcribes a 16 kHz mono WAV. `transcribe_fn` is injectable for tests."""
     s = get_settings()
@@ -138,11 +150,12 @@ def transcribe(
         chunk = audio[int(start * SAMPLE_RATE) : int(end * SAMPLE_RATE)]
         result = fn(
             chunk,
-            path_or_hf_repo=s.stt_model,
+            path_or_hf_repo=model_store.resolve(s.stt_model),
             language=s.stt_language,
             initial_prompt=initial_prompt,
             # Conditioning on previous text makes Whisper loop on long Korean audio.
             condition_on_previous_text=False,
+            word_timestamps=word_timestamps,
             verbose=None,
         )
         per_window.append(clean_segments(result.get("segments", []), offset=start))
@@ -167,6 +180,9 @@ def unload_model() -> None:
 
         ModelHolder.model = None
         ModelHolder.model_path = None
+        import gc  # noqa: PLC0415
+
+        gc.collect()
         mx.clear_cache()
     except Exception:  # noqa: BLE001
         log.debug("Whisper model unload skipped", exc_info=True)

@@ -51,6 +51,8 @@ export interface Meeting {
   audio: AudioFileInfo | null;
   status: JobStatus;
   latest_job_id: string | null;
+  /** User-given names for diarized speakers: {"화자 1": "김민수 과장"} */
+  speaker_names: Record<string, string> | null;
   created_at: string;
   updated_at: string;
 }

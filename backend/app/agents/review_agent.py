@@ -163,6 +163,10 @@ def _grounded_person(name: str, g: Grounding, evidence: str, attendees: list[str
     core = person_core(name)
     if len(norm(core)) >= 2 and (g.mentions(core) or norm(core) in norm(evidence)):
         return True
+    # The speaker of the evidence utterance ("제가 하겠습니다") — diarized label or user-given name.
+    seg = g.locate(evidence) if evidence else None
+    if seg is not None and seg.speaker and norm(person_core(seg.speaker)) == norm(core):
+        return True
     # A registered attendee whose name STT misheard still counts.
     return any(norm(person_core(a)) == norm(core) for a in attendees) and g.near_mention(core) is not None
 
@@ -218,6 +222,7 @@ def ungrounded_numbers(text: str, g: Grounding, extra: str = "") -> list[str]:
     info the user typed) — e.g. a model inventing "21건" or "90%"."""
     source = " ".join(s.text for s in g.segments) + " " + extra
     known = set(NUMBER.findall(source)) | korean_numbers(source)
+    text = re.sub(r"화자\s*\d+", "", text)  # diarization labels are not figures
     return [n for n in dict.fromkeys(NUMBER.findall(text)) if n not in known]
 
 
@@ -317,8 +322,15 @@ def review(
             kept_actions.append(item)
     actions = kept_actions
 
+    speakers = {sp for s in segments if (sp := s.speaker)}
     discussion = [
-        DiscussionItem(topic=d.topic.strip(), content=d.content.strip() or UNKNOWN, speaker=UNKNOWN, timestamp=ts_or_unknown(d.timestamp))
+        DiscussionItem(
+            topic=d.topic.strip(),
+            content=d.content.strip() or UNKNOWN,
+            # Only speakers that actually appear in the (diarized) transcript are kept.
+            speaker=d.speaker.strip() if d.speaker.strip() in speakers else UNKNOWN,
+            timestamp=ts_or_unknown(d.timestamp),
+        )
         for d in final.discussion_items
         if d.topic.strip() or d.content.strip()
     ]

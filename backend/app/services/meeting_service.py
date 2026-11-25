@@ -1,6 +1,7 @@
 """Meeting queries and mutations used by the API routers."""
 
 import logging
+import re
 from datetime import UTC, date, datetime
 
 from sqlalchemy import String, case, cast, func, or_, select, union
@@ -206,3 +207,55 @@ def dashboard(db: Session) -> DashboardOut:
 
 def _job_dict(j: Job) -> dict:
     return {k: getattr(j, k) for k in ("id", "meeting_id", "status", "progress", "message", "error", "created_at", "updated_at")}
+
+
+_PARTICLES = {"이": ("이", "가"), "가": ("이", "가"), "은": ("은", "는"), "는": ("은", "는"), "을": ("을", "를"), "를": ("을", "를"), "과": ("과", "와"), "와": ("과", "와")}
+
+
+def _has_batchim(word: str) -> bool:
+    ch = word.strip()[-1:] if word.strip() else ""
+    code = ord(ch) - 0xAC00 if ch else -1
+    return 0 <= code < 11172 and code % 28 != 0
+
+
+def _rename(text: str, mapping: dict[str, str]) -> str:
+    """Replaces '화자 N' labels (not '화자 1' inside '화자 10') and fixes the particle
+    right after it: '화자 2가' → '박정우 책임이'."""
+    for label, name in mapping.items():
+        def repl(m: re.Match, name: str = name) -> str:
+            p = m.group(1)
+            if p and p in _PARTICLES:
+                p = _PARTICLES[p][0] if _has_batchim(name) else _PARTICLES[p][1]
+            return name + (p or "")
+
+        text = re.sub(rf"{re.escape(label)}(?!\d)(이|가|은|는|을|를|과|와)?(?![가-힣])", repl, text)
+        text = re.sub(rf"{re.escape(label)}(?!\d)", name, text)  # labels followed by other text
+    return text
+
+
+def set_speaker_names(db: Session, meeting: Meeting, names: dict[str, str]) -> Meeting:
+    """Stores the user's names for diarized speakers and applies them to the existing
+    minutes text (so no re-analysis is needed). Previously given names are replaced too."""
+    transcript = db.scalar(select(Transcript).where(Transcript.meeting_id == meeting.id))
+    labels = {s.get("speaker") for s in (transcript.segments if transcript else []) if s.get("speaker")}
+    unknown = set(names) - labels
+    if unknown:
+        raise ValueError(f"전사문에 없는 화자입니다: {', '.join(sorted(unknown))}")
+    old = meeting.speaker_names or {}
+    # What currently appears in the minutes for each label → what it should become.
+    mapping = {old.get(label, label): names.get(label, label) for label in labels if old.get(label, label) != names.get(label, label)}
+
+    mn = db.scalar(select(MeetingMinutes).where(MeetingMinutes.meeting_id == meeting.id))
+    if mn is not None and mapping:
+        mn.meeting_summary = _rename(mn.meeting_summary, mapping)
+        mn.discussion_items = [d | {"speaker": _rename(d.get("speaker", ""), mapping), "content": _rename(d.get("content", ""), mapping)} for d in mn.discussion_items]
+        mn.decisions = [d | {"content": _rename(d.get("content", ""), mapping)} for d in mn.decisions]
+        mn.open_issues = [_rename(x, mapping) for x in mn.open_issues]
+        mn.next_meeting_checks = [_rename(x, mapping) for x in mn.next_meeting_checks]
+        for a in db.scalars(select(ActionItem).where(ActionItem.meeting_id == meeting.id)):
+            a.assignee = _rename(a.assignee, mapping)
+            a.task = _rename(a.task, mapping)
+    meeting.speaker_names = names or None
+    db.commit()
+    db.refresh(meeting)
+    return meeting

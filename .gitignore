@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.offline.example
 
 # Runtime data (meeting audio, transcripts, minutes are private)
 storage/**
@@ -12,6 +13,10 @@ database/*
 logs/*
 !logs/.gitkeep
 *.pid
+
+# Local AI models (large; copied separately for closed networks)
+models/
+wheelhouse/
 
 # Python
 __pycache__/

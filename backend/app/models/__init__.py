@@ -52,6 +52,8 @@ class Meeting(Base):
     # Mirrors the latest job's status for fast list filtering. PENDING until audio arrives.
     status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)
     latest_job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Names the user gave to diarized speakers: {"화자 1": "김민수 과장", ...}
+    speaker_names: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
@@ -91,6 +93,8 @@ class Job(Base):
     llm_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Run speech recognition again even if a transcript of this audio exists.
     retranscribe: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Per-stage time and memory records (app.services.resource_monitor).
+    metrics: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

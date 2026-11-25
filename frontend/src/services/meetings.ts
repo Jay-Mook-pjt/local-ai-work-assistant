@@ -88,6 +88,9 @@ export const getSettings = () => request<AppSettings>("/api/settings");
 
 export const updateSettings = (llm_model: string) => request<AppSettings>("/api/settings", { method: "PUT", json: { llm_model } });
 
+export const setSpeakerNames = (meetingId: string, names: Record<string, string>) =>
+  request<Meeting>(`/api/meetings/${enc(meetingId)}/speakers`, { method: "PUT", json: { names } });
+
 export const getTranscript = (meetingId: string) => request<Transcript | null>(`/api/meetings/${enc(meetingId)}/transcript`);
 
 export const getMinutes = (meetingId: string) => request<MeetingMinutes | null>(`/api/meetings/${enc(meetingId)}/minutes`);

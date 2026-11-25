@@ -7,7 +7,7 @@ from string import Template
 PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts"
 # Active version per template. Older files are kept for comparison; bump a
 # version by adding <name>_vN.md and changing it here.
-PROMPT_VERSIONS = {"system": "v3", "chunk": "v2", "merge": "v2", "single": "v2"}
+PROMPT_VERSIONS = {"system": "v4", "chunk": "v2", "merge": "v2", "single": "v2"}
 
 
 @cache

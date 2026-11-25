@@ -30,8 +30,12 @@ import httpx
 
 from tests.integration.scenarios import SCENARIOS, Scenario
 
+import os
+
 ROOT = Path(__file__).resolve().parents[3]
-API = "http://127.0.0.1:3000"
+API = os.environ.get("E2E_API", "http://127.0.0.1:3000")
+OLLAMA = os.environ.get("E2E_OLLAMA", "http://127.0.0.1:11434")
+LOG_DIR = Path(os.environ.get("E2E_LOG_DIR", ROOT / "logs"))
 FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "/opt/homebrew/bin/ffprobe"
 REPORT_DIR = ROOT / "docs" / "test-reports"
@@ -124,7 +128,7 @@ class Sampler(threading.Thread):
         while not self.stop.is_set():
             self.peak_worker = max(self.peak_worker, self._rss_gb("worker.main"))
             try:
-                models = httpx.get("http://127.0.0.1:11434/api/ps", timeout=2).json().get("models", [])
+                models = httpx.get(f"{OLLAMA}/api/ps", timeout=2).json().get("models", [])
                 self.peak_ollama = max(self.peak_ollama, sum(m.get("size", 0) for m in models) / 1024**3)
             except httpx.HTTPError:
                 pass
@@ -189,12 +193,12 @@ def run_meeting(c: httpx.Client, sc: Scenario, audio: Path, model: str | None) -
 
 
 def _llm_log_size() -> int:
-    p = ROOT / "logs" / "llm_calls.log"
+    p = LOG_DIR / "llm_calls.log"
     return p.stat().st_size if p.exists() else 0
 
 
 def _llm_calls_since(offset: int) -> list[dict]:
-    p = ROOT / "logs" / "llm_calls.log"
+    p = LOG_DIR / "llm_calls.log"
     if not p.exists():
         return []
     with p.open(encoding="utf-8") as f:

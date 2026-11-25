@@ -12,6 +12,10 @@ _TMP = Path(tempfile.mkdtemp(prefix="lawa-test-"))
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP / 'test.db'}"
 os.environ["STORAGE_DIR"] = str(_TMP / "storage")
 os.environ["LOG_DIR"] = str(_TMP / "logs")
+os.environ["DIARIZATION_ENABLED"] = "false"  # tests inject a fake diarizer where needed
+# Never touch the real Ollama from tests (no unload/ps calls against the running service).
+os.environ["OLLAMA_BASE_URL"] = "http://127.0.0.1:9"
+os.environ["LLM_UNLOAD_AFTER_JOB"] = "false"
 
 from fastapi.testclient import TestClient  # noqa: E402
 

@@ -3,6 +3,8 @@
 Run from backend/:  .venv/bin/python -m worker.main
 """
 
+import app.offline  # noqa: F401, I001 - must precede any model-library import
+
 import logging
 import os
 import signal

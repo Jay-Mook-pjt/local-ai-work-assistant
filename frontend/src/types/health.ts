@@ -10,5 +10,5 @@ export interface HealthResponse {
   status: "ok" | "degraded";
   env: string;
   llm_model: string;
-  components: Record<"database" | "ollama" | "stt", ComponentStatus>;
+  components: Record<"database" | "ollama" | "stt" | "diarization", ComponentStatus>;
 }

@@ -1,0 +1,15 @@
+(version 1)
+; Simulated closed network: everything is allowed except network traffic that
+; leaves this Mac. Loopback (localhost) and local Unix sockets keep working, so
+; Frontend → Backend → Ollama and a localhost SMTP relay still function.
+(allow default)
+(deny network-outbound)
+(deny network-inbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-inbound (local ip "localhost:*"))
+(allow network-bind (local ip "*:*"))
+(allow network-outbound (remote unix-socket))
+(allow network* (local unix-socket))
+; No name resolution either (macOS resolves DNS through this socket).
+(deny network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
+(deny network-outbound (remote unix-socket (path-literal "/var/run/mDNSResponder")))

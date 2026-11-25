@@ -20,6 +20,7 @@ import { EmailPanel } from "@/components/meeting/EmailPanel";
 import { JobProgress } from "@/components/meeting/JobProgress";
 import { MinutesView } from "@/components/meeting/MinutesView";
 import { ReanalyzeDialog } from "@/components/meeting/ReanalyzeDialog";
+import { SpeakerPanel } from "@/components/meeting/SpeakerPanel";
 import { TranscriptView } from "@/components/meeting/TranscriptView";
 import { useAsync } from "@/hooks/useAsync";
 import { formatBytes, formatDate, formatDateTime, formatDuration, isProcessing } from "@/lib/format";
@@ -198,9 +199,14 @@ function MeetingDetail() {
           ))}
 
         {tab === "transcript" && (
-          <Card>
-            <TranscriptView transcript={transcript} focusTs={focusTs} />
-          </Card>
+          <div className="space-y-6">
+            {transcript && transcript.segments.some((s) => s.speaker) && (
+              <SpeakerPanel key={JSON.stringify(meeting.speaker_names)} meeting={meeting} transcript={transcript} onSaved={reload} />
+            )}
+            <Card>
+              <TranscriptView transcript={transcript} focusTs={focusTs} speakerNames={meeting.speaker_names} />
+            </Card>
+          </div>
         )}
 
         {tab === "documents" &&

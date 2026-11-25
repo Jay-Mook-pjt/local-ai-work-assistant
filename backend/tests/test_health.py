@@ -12,7 +12,7 @@ def test_health_reports_all_components():
     assert r.status_code == 200
     body = r.json()
     assert body["status"] in ("ok", "degraded")
-    assert set(body["components"]) == {"database", "ollama", "stt"}
+    assert set(body["components"]) == {"database", "ollama", "stt", "diarization"}
     assert body["components"]["database"]["ok"] is True
 
 

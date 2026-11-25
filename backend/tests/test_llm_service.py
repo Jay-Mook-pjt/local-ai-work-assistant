@@ -72,3 +72,21 @@ def test_timeout_message():
 
     with pytest.raises(llm_service.LLMError, match="초과"):
         call(httpx.MockTransport(slow))
+
+
+def test_cloud_models_are_refused_before_any_request():
+    t, seen = ollama([(200, json.dumps(GOOD))])
+    for name in ("gpt-oss:120b-cloud", "qwen3-coder:480b-cloud", "deepseek-v3.1:671b-cloud", "kimi:cloud"):
+        with pytest.raises(llm_service.LLMError, match="클라우드 모델"):
+            llm_service.chat_json(system="s", user="u", schema=FinalMinutes, model=name, transport=t)
+    assert seen == []  # nothing was sent
+
+
+def test_installed_models_hides_cloud_stubs():
+    def handler(req):
+        return httpx.Response(200, json={"models": [
+            {"name": "gpt-oss:120b-cloud", "remote_model": "gpt-oss:120b", "remote_host": "https://ollama.com"},
+            {"name": "qwen3:14b"},
+            {"name": "something:latest", "remote_host": "https://ollama.com"},
+        ]})
+    assert llm_service.installed_models(transport=httpx.MockTransport(handler)) == ["qwen3:14b"]

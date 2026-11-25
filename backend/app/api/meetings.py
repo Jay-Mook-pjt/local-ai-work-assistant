@@ -20,6 +20,7 @@ from app.schemas.meeting import (
     MeetingOut,
     MinutesOut,
     MinutesUpdate,
+    SpeakerNamesUpdate,
     TranscriptOut,
 )
 from app.services import meeting_service
@@ -62,6 +63,15 @@ def delete_meeting(meeting: MeetingDep, db: DB) -> Response:
 def get_transcript(meeting: MeetingDep, db: DB) -> TranscriptOut | None:
     t = db.scalar(select(Transcript).where(Transcript.meeting_id == meeting.id))
     return TranscriptOut.model_validate(t) if t else None
+
+
+@router.put("/meetings/{id}/speakers", response_model=MeetingOut)
+def set_speakers(meeting: MeetingDep, body: SpeakerNamesUpdate, db: DB) -> MeetingOut:
+    """Names diarized speakers ('화자 1' → '김민수 과장'); also updates the current minutes."""
+    try:
+        return MeetingOut.model_validate(meeting_service.set_speaker_names(db, meeting, body.names))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/meetings/{id}/minutes", response_model=MinutesOut | None)

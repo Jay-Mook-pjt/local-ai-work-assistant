@@ -65,8 +65,27 @@ class MeetingOut(ORM):
     audio: AudioFileOut | None
     status: JobStatus
     latest_job_id: str | None
+    speaker_names: dict[str, str] | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class SpeakerNamesUpdate(BaseModel):
+    """{"화자 1": "김민수 과장"}; an empty name removes the mapping."""
+
+    names: dict[str, str] = Field(default_factory=dict, max_length=50)
+
+    @field_validator("names")
+    @classmethod
+    def _clean(cls, v: dict[str, str]) -> dict[str, str]:
+        out = {}
+        for k, name in v.items():
+            name = name.strip()
+            if len(name) > 100 or "\n" in name:
+                raise ValueError("화자 이름은 한 줄, 100자 이내로 입력하세요.")
+            if name:
+                out[k.strip()] = name
+        return out
 
 
 class JobOut(ORM):
@@ -75,6 +94,7 @@ class JobOut(ORM):
     status: JobStatus
     llm_model: str | None = None
     retranscribe: bool | None = None
+    metrics: list[dict] | None = None
     progress: int
     message: str | None
     error: str | None
